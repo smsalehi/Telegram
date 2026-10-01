@@ -55,7 +55,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_KEY" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
-            echo "::error::Signing secrets missing. Add ANDROID_KEYSTORE_KEY / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD under repo Settings > Secrets > Actions (same values as AccountingProject)."
+            echo "::error::Signing secrets missing. Add ANDROID_KEYSTORE_KEY / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD under repo Settings > Secrets > Actions."
             exit 1
           fi
 
@@ -70,29 +70,10 @@ jobs:
           fi
           ls -la TMessagesProj/config/release.keystore
 
-      - name: Build Xray core for 32-bit ABIs (arm32/x86)
-        run: |
-          # prepareXrayCore still requires these even for an arm64-only APK.
-          # Upstream Xray-core no longer ships android binaries for armeabi-v7a/x86.
-          curl -sSL -o /tmp/go.tgz https://go.dev/dl/go1.27.1.linux-amd64.tar.gz
-          sudo rm -rf /usr/local/go && sudo tar -xzf /tmp/go.tgz -C /usr/local
-          export PATH=/usr/local/go/bin:$PATH
-          echo "/usr/local/go/bin" >> $GITHUB_PATH
-          go version
-          git clone --depth 1 --branch v26.3.27 https://github.com/XTLS/Xray-core.git /tmp/xray-src
-          mkdir -p "$GITHUB_WORKSPACE/xray-prebuilt/armeabi-v7a" "$GITHUB_WORKSPACE/xray-prebuilt/x86"
-          LLVM_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          cd /tmp/xray-src
-          CC="$LLVM_BIN/armv7a-linux-androideabi21-clang" CGO_ENABLED=1 GOOS=android GOARCH=arm GOARM=7 \
-            go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/xray-prebuilt/armeabi-v7a/libxray.so" ./main
-          CC="$LLVM_BIN/i686-linux-android21-clang" CGO_ENABLED=1 GOOS=android GOARCH=386 \
-            go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/xray-prebuilt/x86/libxray.so" ./main
-          file "$GITHUB_WORKSPACE/xray-prebuilt/armeabi-v7a/libxray.so" "$GITHUB_WORKSPACE/xray-prebuilt/x86/libxray.so"
-          echo "XRAY_PREBUILT_DIR=$GITHUB_WORKSPACE/xray-prebuilt" >> $GITHUB_ENV
-
       - name: Build arm64 APK
         run: |
           ./gradlew :TMessagesProj_AppStandalone:assembleA64Standalone \
+            -PnativeTarget=arm64-v8a \
             -PRELEASE_STORE_PASSWORD="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
             -PRELEASE_KEY_PASSWORD="${{ secrets.ANDROID_KEY_PASSWORD }}" \
             -PRELEASE_KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}" \
