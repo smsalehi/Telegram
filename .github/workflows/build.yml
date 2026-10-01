@@ -47,9 +47,29 @@ jobs:
           sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> $GITHUB_ENV
 
-      - name: Decode signing keystore
+      - name: Check signing secrets
+        env:
+          KEYSTORE_KEY: ${{ secrets.ANDROID_KEYSTORE_KEY }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > TMessagesProj/config/release.keystore
+          if [ -z "$KEYSTORE_KEY" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Signing secrets missing. Add ANDROID_KEYSTORE_KEY / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD under repo Settings > Secrets > Actions (same values as AccountingProject)."
+            exit 1
+          fi
+
+      - name: Decrypt signing keystore (same as AccountingProject)
+        env:
+          KEYSTORE_KEY: ${{ secrets.ANDROID_KEYSTORE_KEY }}
+        run: |
+          # Same pattern as AccountingProject: encrypted keystore ships in repo,
+          # only short Fernet key comes from secrets.
+          pip install -q cryptography
+          if ! python3 -c "import os; from cryptography.fernet import Fernet; open('TMessagesProj/config/release.keystore','wb').write(Fernet(os.environ['KEYSTORE_KEY'].strip().encode()).decrypt(open('.github/keystore/android-keystore.enc','rb').read()))"; then
+            echo "::error::Could not decrypt the keystore. Check the ANDROID_KEYSTORE_KEY secret value."
+            exit 1
+          fi
           ls -la TMessagesProj/config/release.keystore
 
       - name: Build Xray core for 32-bit ABIs (arm32/x86)
@@ -78,9 +98,9 @@ jobs:
                     :TMessagesProj_AppStandalone:assembleA32Standalone \
                     :TMessagesProj_AppStandalone:assembleX64Standalone \
                     :TMessagesProj_AppStandalone:assembleX86Standalone \
-            -PRELEASE_STORE_PASSWORD="${{ secrets.KEYSTORE_PASS }}" \
-            -PRELEASE_KEY_PASSWORD="${{ secrets.ALIAS_PASS }}" \
-            -PRELEASE_KEY_ALIAS="${{ secrets.ALIAS_NAME }}" \
+            -PRELEASE_STORE_PASSWORD="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -PRELEASE_KEY_PASSWORD="${{ secrets.ANDROID_KEY_PASSWORD }}" \
+            -PRELEASE_KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}" \
             --stacktrace
 
       - name: Rename APKs
