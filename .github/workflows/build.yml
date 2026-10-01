@@ -1,4 +1,4 @@
-name: Build Telegram XRay
+﻿name: Build Telegram XRay
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
 
 env:
   APP_VERSION_NAME: "12.10.5"
-  RELEASE_TAG: "v12.10.5-xray1"
+  RELEASE_TAG: "v12.10.5-xray1-arm64"
 
 jobs:
   build:
@@ -55,7 +55,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_KEY" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
-            echo "::error::Signing secrets missing. Add ANDROID_KEYSTORE_KEY / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD under repo Settings > Secrets > Actions."
+            echo "::error::Signing secrets missing. Add ANDROID_KEYSTORE_KEY / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD under repo Settings > Secrets > Actions (same values as AccountingProject)."
             exit 1
           fi
 
@@ -63,6 +63,8 @@ jobs:
         env:
           KEYSTORE_KEY: ${{ secrets.ANDROID_KEYSTORE_KEY }}
         run: |
+          # Same pattern as AccountingProject: encrypted keystore ships in repo,
+          # only short Fernet key comes from secrets.
           pip install -q cryptography
           if ! python3 -c "import os; from cryptography.fernet import Fernet; open('TMessagesProj/config/release.keystore','wb').write(Fernet(os.environ['KEYSTORE_KEY'].strip().encode()).decrypt(open('.github/keystore/android-keystore.enc','rb').read()))"; then
             echo "::error::Could not decrypt the keystore. Check the ANDROID_KEYSTORE_KEY secret value."
@@ -70,7 +72,7 @@ jobs:
           fi
           ls -la TMessagesProj/config/release.keystore
 
-      - name: Build arm64 APK
+      - name: Build standalone APK (arm64 only)
         run: |
           ./gradlew :TMessagesProj_AppStandalone:assembleA64Standalone \
             -PnativeTarget=arm64-v8a \
@@ -83,7 +85,7 @@ jobs:
         run: |
           OUT=TMessagesProj_AppStandalone/build/outputs/apk
           mkdir -p dist
-          mv "\( OUT/a64/standalone/app.apk" "dist/Telegram-XRay- \){{ env.APP_VERSION_NAME }}-arm64.apk"
+          mv "$OUT/a64/standalone/app.apk"   "dist/Telegram-XRay-${{ env.APP_VERSION_NAME }}-arm64.apk"
           ls -la dist
 
       - name: Upload APK
@@ -97,12 +99,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: Telegram XRay ${{ env.APP_VERSION_NAME }} (arm64)
+          name: Telegram XRay ${{ env.APP_VERSION_NAME }} arm64
           files: dist/*.apk
           body: |
             Telegram ${{ env.APP_VERSION_NAME }} with built-in XRay (VLESS) proxy support.
-            XRay core v26.3.27 bundled.
+            arm64-v8a only (most modern phones).
 
-            - **arm64**: arm64-v8a (most modern phones)
-
-            Signed with a personal key — uninstall the official Telegram first if the package signature conflicts.
+            Signed with a personal key ظ¤ uninstall the official Telegram first if the package signature conflicts.
