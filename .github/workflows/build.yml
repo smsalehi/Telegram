@@ -63,8 +63,6 @@ jobs:
         env:
           KEYSTORE_KEY: ${{ secrets.ANDROID_KEYSTORE_KEY }}
         run: |
-          # Same pattern as AccountingProject: encrypted keystore ships in repo,
-          # only short Fernet key comes from secrets.
           pip install -q cryptography
           if ! python3 -c "import os; from cryptography.fernet import Fernet; open('TMessagesProj/config/release.keystore','wb').write(Fernet(os.environ['KEYSTORE_KEY'].strip().encode()).decrypt(open('.github/keystore/android-keystore.enc','rb').read()))"; then
             echo "::error::Could not decrypt the keystore. Check the ANDROID_KEYSTORE_KEY secret value."
@@ -72,8 +70,25 @@ jobs:
           fi
           ls -la TMessagesProj/config/release.keystore
 
-      # Removed the entire "Build Xray core for 32-bit ABIs" step —
-      # not needed when only building arm64.
+      - name: Build Xray core for 32-bit ABIs (arm32/x86)
+        run: |
+          # prepareXrayCore still requires these even for an arm64-only APK.
+          # Upstream Xray-core no longer ships android binaries for armeabi-v7a/x86.
+          curl -sSL -o /tmp/go.tgz https://go.dev/dl/go1.27.1.linux-amd64.tar.gz
+          sudo rm -rf /usr/local/go && sudo tar -xzf /tmp/go.tgz -C /usr/local
+          export PATH=/usr/local/go/bin:$PATH
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
+          go version
+          git clone --depth 1 --branch v26.3.27 https://github.com/XTLS/Xray-core.git /tmp/xray-src
+          mkdir -p "$GITHUB_WORKSPACE/xray-prebuilt/armeabi-v7a" "$GITHUB_WORKSPACE/xray-prebuilt/x86"
+          LLVM_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          cd /tmp/xray-src
+          CC="$LLVM_BIN/armv7a-linux-androideabi21-clang" CGO_ENABLED=1 GOOS=android GOARCH=arm GOARM=7 \
+            go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/xray-prebuilt/armeabi-v7a/libxray.so" ./main
+          CC="$LLVM_BIN/i686-linux-android21-clang" CGO_ENABLED=1 GOOS=android GOARCH=386 \
+            go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/xray-prebuilt/x86/libxray.so" ./main
+          file "$GITHUB_WORKSPACE/xray-prebuilt/armeabi-v7a/libxray.so" "$GITHUB_WORKSPACE/xray-prebuilt/x86/libxray.so"
+          echo "XRAY_PREBUILT_DIR=$GITHUB_WORKSPACE/xray-prebuilt" >> $GITHUB_ENV
 
       - name: Build arm64 APK
         run: |
