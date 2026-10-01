@@ -105,4 +105,4 @@ jobs:
             Telegram ${{ env.APP_VERSION_NAME }} with built-in XRay (VLESS) proxy support.
             arm64-v8a only (most modern phones).
 
-            Signed with a personal key ظ¤ uninstall the official Telegram first if the package signature conflicts.
+            Signed with a personal key  - uninstall the official Telegram first if the package signature conflicts.
