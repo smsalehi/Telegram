@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       publish_release:
-        description: "Create a GitHub Release with the 5 APKs"
+        description: "Create a GitHub Release with the arm64 APK"
         type: boolean
         default: true
 
@@ -47,57 +47,53 @@ jobs:
           sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> $GITHUB_ENV
 
-      - name: Decode signing keystore
+      - name: Check signing secrets
+        env:
+          KEYSTORE_KEY: ${{ secrets.ANDROID_KEYSTORE_KEY }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > TMessagesProj/config/release.keystore
+          if [ -z "$KEYSTORE_KEY" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Signing secrets missing. Add ANDROID_KEYSTORE_KEY / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD under repo Settings > Secrets > Actions (same values as AccountingProject)."
+            exit 1
+          fi
+
+      - name: Decrypt signing keystore (same as AccountingProject)
+        env:
+          KEYSTORE_KEY: ${{ secrets.ANDROID_KEYSTORE_KEY }}
+        run: |
+          # Same pattern as AccountingProject: encrypted keystore ships in repo,
+          # only short Fernet key comes from secrets.
+          pip install -q cryptography
+          if ! python3 -c "import os; from cryptography.fernet import Fernet; open('TMessagesProj/config/release.keystore','wb').write(Fernet(os.environ['KEYSTORE_KEY'].strip().encode()).decrypt(open('.github/keystore/android-keystore.enc','rb').read()))"; then
+            echo "::error::Could not decrypt the keystore. Check the ANDROID_KEYSTORE_KEY secret value."
+            exit 1
+          fi
           ls -la TMessagesProj/config/release.keystore
 
-      - name: Build Xray core for 32-bit ABIs (arm32/x86)
-        run: |
-          # Upstream Xray-core no longer ships android binaries for armeabi-v7a/x86;
-          # build them from the same source tag with Go (GOOS=android, NDK clang for cgo linking).
-          # Xray v26.3.27 needs Go >= 1.26, newer than apt's golang-go, so install from go.dev.
-          curl -sSL -o /tmp/go.tgz https://go.dev/dl/go1.27.1.linux-amd64.tar.gz
-          sudo rm -rf /usr/local/go && sudo tar -xzf /tmp/go.tgz -C /usr/local
-          export PATH=/usr/local/go/bin:$PATH
-          echo "/usr/local/go/bin" >> $GITHUB_PATH
-          go version
-          git clone --depth 1 --branch v26.3.27 https://github.com/XTLS/Xray-core.git /tmp/xray-src
-          mkdir -p "$GITHUB_WORKSPACE/xray-prebuilt/armeabi-v7a" "$GITHUB_WORKSPACE/xray-prebuilt/x86"
-          LLVM_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          cd /tmp/xray-src
-          CC="$LLVM_BIN/armv7a-linux-androideabi21-clang" CGO_ENABLED=1 GOOS=android GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/xray-prebuilt/armeabi-v7a/libxray.so" ./main
-          CC="$LLVM_BIN/i686-linux-android21-clang" CGO_ENABLED=1 GOOS=android GOARCH=386 go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/xray-prebuilt/x86/libxray.so" ./main
-          file "$GITHUB_WORKSPACE/xray-prebuilt/armeabi-v7a/libxray.so" "$GITHUB_WORKSPACE/xray-prebuilt/x86/libxray.so"
-          echo "XRAY_PREBUILT_DIR=$GITHUB_WORKSPACE/xray-prebuilt" >> $GITHUB_ENV
+      # Removed the entire "Build Xray core for 32-bit ABIs" step —
+      # not needed when only building arm64.
 
-      - name: Build standalone APKs (universal + per-ABI)
+      - name: Build arm64 APK
         run: |
-          ./gradlew :TMessagesProj_AppStandalone:assembleAfatStandalone \
-                    :TMessagesProj_AppStandalone:assembleA64Standalone \
-                    :TMessagesProj_AppStandalone:assembleA32Standalone \
-                    :TMessagesProj_AppStandalone:assembleX64Standalone \
-                    :TMessagesProj_AppStandalone:assembleX86Standalone \
-            -PRELEASE_STORE_PASSWORD="${{ secrets.KEYSTORE_PASS }}" \
-            -PRELEASE_KEY_PASSWORD="${{ secrets.ALIAS_PASS }}" \
-            -PRELEASE_KEY_ALIAS="${{ secrets.ALIAS_NAME }}" \
+          ./gradlew :TMessagesProj_AppStandalone:assembleA64Standalone \
+            -PRELEASE_STORE_PASSWORD="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -PRELEASE_KEY_PASSWORD="${{ secrets.ANDROID_KEY_PASSWORD }}" \
+            -PRELEASE_KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}" \
             --stacktrace
 
-      - name: Rename APKs
+      - name: Rename APK
         run: |
           OUT=TMessagesProj_AppStandalone/build/outputs/apk
           mkdir -p dist
-          mv "$OUT/afat/standalone/app.apk"  "dist/Telegram-XRay-${{ env.APP_VERSION_NAME }}-universal.apk"
-          mv "$OUT/a64/standalone/app.apk"   "dist/Telegram-XRay-${{ env.APP_VERSION_NAME }}-arm64.apk"
-          mv "$OUT/a32/standalone/app.apk"   "dist/Telegram-XRay-${{ env.APP_VERSION_NAME }}-arm32.apk"
-          mv "$OUT/x64/standalone/app.apk"   "dist/Telegram-XRay-${{ env.APP_VERSION_NAME }}-x86_64.apk"
-          mv "$OUT/x86/standalone/app.apk"   "dist/Telegram-XRay-${{ env.APP_VERSION_NAME }}-x86.apk"
+          mv "\( OUT/a64/standalone/app.apk" "dist/Telegram-XRay- \){{ env.APP_VERSION_NAME }}-arm64.apk"
           ls -la dist
 
-      - name: Upload APKs
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Telegram-XRay-${{ env.APP_VERSION_NAME }}
+          name: Telegram-XRay-${{ env.APP_VERSION_NAME }}-arm64
           path: dist/*.apk
 
       - name: Publish GitHub Release
@@ -105,15 +101,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: Telegram XRay ${{ env.APP_VERSION_NAME }}
+          name: Telegram XRay ${{ env.APP_VERSION_NAME }} (arm64)
           files: dist/*.apk
           body: |
             Telegram ${{ env.APP_VERSION_NAME }} with built-in XRay (VLESS) proxy support.
-            XRay core v26.3.27 bundled for all architectures.
+            XRay core v26.3.27 bundled.
 
-            - **universal**: all ABIs (armeabi-v7a, arm64-v8a, x86, x86_64)
             - **arm64**: arm64-v8a (most modern phones)
-            - **arm32**: armeabi-v7a (older phones)
-            - **x86_64** / **x86**: emulators and x86 devices
 
             Signed with a personal key — uninstall the official Telegram first if the package signature conflicts.
