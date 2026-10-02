@@ -11323,6 +11323,10 @@
     <string name="GeminiTranslate">Gemini Translate</string>
     <string name="GeminiTranslateEnable">Translate with Gemini</string>
     <string name="GeminiModel">Model</string>
+    <string name="GeminiRedirectIp">Redirect IP</string>
+    <string name="GeminiRedirectHint">e.g. 142.250.72.10, empty = direct</string>
+    <string name="GeminiDirect">Direct</string>
+    <string name="GeminiInvalidIp">Invalid IPv4 address</string>
     <string name="GeminiApiKey">Gemini API key</string>
     <string name="GeminiApiKeyHint">Paste your Gemini API key</string>
     <string name="GeminiPrompt">Prompt</string>

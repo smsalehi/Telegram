@@ -45,10 +45,11 @@ public class GeminiTranslateActivity extends BaseFragment {
     private static final int ROW_ENABLE = 1;
     private static final int ROW_MODEL = 2;
     private static final int ROW_API_KEY = 3;
-    private static final int ROW_PROMPT = 4;
-    private static final int ROW_SHADOW = 5;
-    private static final int ROW_INFO = 6;
-    private static final int ROW_COUNT = 7;
+    private static final int ROW_REDIRECT = 4;
+    private static final int ROW_PROMPT = 5;
+    private static final int ROW_SHADOW = 6;
+    private static final int ROW_INFO = 7;
+    private static final int ROW_COUNT = 8;
 
     private RecyclerListView listView;
     private ListAdapter listAdapter;
@@ -104,6 +105,8 @@ public class GeminiTranslateActivity extends BaseFragment {
                 listAdapter.notifyItemChanged(ROW_API_KEY);
             } else if (position == ROW_API_KEY) {
                 openApiKeyDialog(false);
+            } else if (position == ROW_REDIRECT) {
+                openRedirectDialog();
             } else if (position == ROW_MODEL) {
                 openModelDialog();
             } else if (position == ROW_PROMPT) {
@@ -140,6 +143,39 @@ public class GeminiTranslateActivity extends BaseFragment {
             }
             if (listAdapter != null) {
                 listAdapter.notifyDataSetChanged();
+            }
+        });
+        builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
+        showDialog(builder.create());
+    }
+
+    private void openRedirectDialog() {
+        if (getParentActivity() == null) {
+            return;
+        }
+        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+        builder.setTitle(LocaleController.getString(R.string.GeminiRedirectIp));
+
+        LinearLayout layout = new LinearLayout(getParentActivity());
+        layout.setOrientation(LinearLayout.VERTICAL);
+        final EditTextBoldCursor editText = new EditTextBoldCursor(getParentActivity());
+        editText.setTextSize(16);
+        editText.setText(GeminiTranslator.getRedirectIp());
+        editText.setHint(LocaleController.getString(R.string.GeminiRedirectHint));
+        editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        editText.setSelection(editText.getText() != null ? editText.getText().length() : 0);
+        layout.addView(editText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 36, Gravity.LEFT | Gravity.TOP, 24, 6, 24, 0));
+        builder.setView(layout);
+
+        builder.setPositiveButton(LocaleController.getString(R.string.Save), (dialog, which) -> {
+            String ip = editText.getText() != null ? editText.getText().toString().trim() : "";
+            if (!ip.isEmpty() && !GeminiTranslator.isValidIpv4(ip)) {
+                android.widget.Toast.makeText(getParentActivity(), LocaleController.getString(R.string.GeminiInvalidIp), android.widget.Toast.LENGTH_SHORT).show();
+                return;
+            }
+            GeminiTranslator.setRedirectIp(ip);
+            if (listAdapter != null) {
+                listAdapter.notifyItemChanged(ROW_REDIRECT);
             }
         });
         builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
@@ -225,7 +261,7 @@ public class GeminiTranslateActivity extends BaseFragment {
         public int getItemViewType(int position) {
             if (position == ROW_HEADER) return VIEW_TYPE_HEADER;
             if (position == ROW_ENABLE) return VIEW_TYPE_SWITCH;
-            if (position == ROW_MODEL || position == ROW_API_KEY || position == ROW_PROMPT) return VIEW_TYPE_SETTINGS;
+            if (position == ROW_MODEL || position == ROW_API_KEY || position == ROW_REDIRECT || position == ROW_PROMPT) return VIEW_TYPE_SETTINGS;
             if (position == ROW_SHADOW) return VIEW_TYPE_SHADOW;
             return VIEW_TYPE_INFO;
         }
@@ -272,6 +308,9 @@ public class GeminiTranslateActivity extends BaseFragment {
                     TextSettingsCell cell = (TextSettingsCell) holder.itemView;
                     if (position == ROW_MODEL) {
                         cell.setTextAndValue(LocaleController.getString(R.string.GeminiModel), GeminiTranslator.getModel(), true);
+                    } else if (position == ROW_REDIRECT) {
+                        String ip = GeminiTranslator.getRedirectIp();
+                        cell.setTextAndValue(LocaleController.getString(R.string.GeminiRedirectIp), ip.isEmpty() ? LocaleController.getString(R.string.GeminiDirect) : ip, true);
                     } else if (position == ROW_PROMPT) {
                         cell.setTextAndValue(LocaleController.getString(R.string.GeminiPrompt), GeminiTranslator.isCustomPrompt() ? LocaleController.getString(R.string.GeminiCustom) : LocaleController.getString(R.string.GeminiDefault), true);
                     } else {

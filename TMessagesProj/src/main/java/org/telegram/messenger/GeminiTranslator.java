@@ -8,9 +8,14 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -19,6 +24,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
 
 /**
  * Gemini-backed translation engine.
@@ -38,6 +48,10 @@ public class GeminiTranslator {
     private static final String KEY_API_KEY = "gemini_translate_key";
     private static final String KEY_MODEL = "gemini_translate_model";
     private static final String KEY_PROMPT = "gemini_translate_prompt";
+    private static final String KEY_REDIRECT_IP = "gemini_redirect_ip";
+
+    private static final String GEMINI_HOST = "generativelanguage.googleapis.com";
+    private static final int GEMINI_PORT = 443;
 
     public static final String[] MODELS = new String[]{
             "gemini-2.0-flash",
@@ -139,6 +153,211 @@ public class GeminiTranslator {
         }
     }
 
+    public static String getRedirectIp() {
+        try {
+            String ip = prefs().getString(KEY_REDIRECT_IP, "");
+            return ip == null ? "" : ip.trim();
+        } catch (Throwable e) {
+            return "";
+        }
+    }
+
+    public static void setRedirectIp(String ip) {
+        try {
+            prefs().edit().putString(KEY_REDIRECT_IP, ip == null ? "" : ip.trim()).apply();
+        } catch (Throwable ignored) {}
+    }
+
+    public static boolean isValidIpv4(String ip) {
+        if (TextUtils.isEmpty(ip)) {
+            return false;
+        }
+        String[] parts = ip.trim().split("\\.", -1);
+        if (parts.length != 4) {
+            return false;
+        }
+        for (String part : parts) {
+            if (part.isEmpty() || part.length() > 3) {
+                return false;
+            }
+            for (int i = 0; i < part.length(); i++) {
+                if (!Character.isDigit(part.charAt(i))) {
+                    return false;
+                }
+            }
+            try {
+                int value = Integer.parseInt(part);
+                if (value < 0 || value > 255) {
+                    return false;
+                }
+            } catch (NumberFormatException e) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Validated redirect target, or null when disabled. Empty = direct connection. */
+    private static String activeRedirectIp() {
+        String ip = getRedirectIp();
+        return isValidIpv4(ip) ? ip : null;
+    }
+
+    private static class HttpResult {
+        int code;
+        String body;
+    }
+
+    private static String readAsciiLine(InputStream in) throws java.io.IOException {
+        ByteArrayOutputStream buf = new ByteArrayOutputStream(128);
+        int b;
+        while ((b = in.read()) != -1) {
+            if (b == '\n') {
+                break;
+            }
+            if (b != '\r') {
+                buf.write(b);
+            }
+        }
+        if (b == -1 && buf.size() == 0) {
+            return null;
+        }
+        return buf.toString("US-ASCII");
+    }
+
+    private static void readFully(InputStream in, byte[] b, int off, int len) throws java.io.IOException {
+        while (len > 0) {
+            int r = in.read(b, off, len);
+            if (r == -1) {
+                throw new java.io.IOException("unexpected end of stream");
+            }
+            off += r;
+            len -= r;
+        }
+    }
+
+    /**
+     * Direct-dial HTTPS client with Xray freedom-style "redirect" semantics:
+     * the TCP connection goes to redirectIp:443 instead of DNS, while TLS SNI
+     * and certificate verification still use the real hostname. Used only when
+     * the user configured a Redirect IP; otherwise the normal path applies.
+     */
+    private static HttpResult httpsExchange(String method, String path, String jsonBody) throws java.io.IOException {
+        String redirectIp = activeRedirectIp();
+        if (redirectIp == null) {
+            throw new java.io.IOException("redirect not configured");
+        }
+        InetAddress addr = InetAddress.getByName(redirectIp);
+        Socket plain = new Socket();
+        try {
+            plain.connect(new InetSocketAddress(addr, GEMINI_PORT), 15000);
+            plain.setSoTimeout(30000);
+            SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+            SSLSocket ssl = (SSLSocket) factory.createSocket(plain, GEMINI_HOST, GEMINI_PORT, true);
+            try {
+                ssl.startHandshake();
+                if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(GEMINI_HOST, ssl.getSession())) {
+                    throw new SSLException("hostname verification failed for " + GEMINI_HOST);
+                }
+                byte[] payload = jsonBody != null ? jsonBody.getBytes(StandardCharsets.UTF_8) : new byte[0];
+                StringBuilder req = new StringBuilder(256);
+                req.append(method).append(' ').append(path).append(" HTTP/1.1\r\n");
+                req.append("Host: ").append(GEMINI_HOST).append("\r\n");
+                req.append("Content-Type: application/json\r\n");
+                req.append("x-goog-api-key: ").append(getApiKey()).append("\r\n");
+                req.append("Content-Length: ").append(payload.length).append("\r\n");
+                req.append("Connection: close\r\n\r\n");
+                OutputStream out = ssl.getOutputStream();
+                out.write(req.toString().getBytes(StandardCharsets.US_ASCII));
+                out.write(payload);
+                out.flush();
+
+                InputStream in = ssl.getInputStream();
+                int code = 0;
+                String status = readAsciiLine(in);
+                if (status != null) {
+                    String[] parts = status.split(" ", 3);
+                    if (parts.length >= 2) {
+                        try {
+                            code = Integer.parseInt(parts[1]);
+                        } catch (NumberFormatException ignored) {}
+                    }
+                }
+                int contentLength = -1;
+                boolean chunked = false;
+                String header;
+                while ((header = readAsciiLine(in)) != null && !header.isEmpty()) {
+                    int colon = header.indexOf(':');
+                    if (colon > 0) {
+                        String name = header.substring(0, colon).trim().toLowerCase(Locale.US);
+                        String value = header.substring(colon + 1).trim().toLowerCase(Locale.US);
+                        if ("content-length".equals(name)) {
+                            try {
+                                contentLength = Integer.parseInt(value);
+                            } catch (NumberFormatException ignored) {}
+                        } else if ("transfer-encoding".equals(name) && value.contains("chunked")) {
+                            chunked = true;
+                        }
+                    }
+                }
+                ByteArrayOutputStream body = new ByteArrayOutputStream();
+                if (chunked) {
+                    for (;;) {
+                        String chunkLine = readAsciiLine(in);
+                        if (chunkLine == null) {
+                            break;
+                        }
+                        int semi = chunkLine.indexOf(';');
+                        int size;
+                        try {
+                            size = Integer.parseInt(chunkLine.substring(0, semi >= 0 ? semi : chunkLine.length()).trim(), 16);
+                        } catch (NumberFormatException e) {
+                            throw new java.io.IOException("bad chunk size");
+                        }
+                        if (size == 0) {
+                            while ((chunkLine = readAsciiLine(in)) != null && !chunkLine.isEmpty()) {
+                            }
+                            break;
+                        }
+                        if (size < 0 || size > 16 * 1024 * 1024) {
+                            throw new java.io.IOException("bad chunk size");
+                        }
+                        byte[] chunk = new byte[size];
+                        readFully(in, chunk, 0, size);
+                        body.write(chunk);
+                        readAsciiLine(in);
+                    }
+                } else if (contentLength >= 0) {
+                    if (contentLength > 16 * 1024 * 1024) {
+                        throw new java.io.IOException("response too large");
+                    }
+                    byte[] buf = new byte[contentLength];
+                    readFully(in, buf, 0, contentLength);
+                    body.write(buf);
+                } else {
+                    byte[] tmp = new byte[8192];
+                    int r;
+                    while ((r = in.read(tmp)) != -1) {
+                        body.write(tmp, 0, r);
+                    }
+                }
+                HttpResult result = new HttpResult();
+                result.code = code;
+                result.body = new String(body.toByteArray(), StandardCharsets.UTF_8);
+                return result;
+            } finally {
+                try {
+                    ssl.close();
+                } catch (Exception ignored) {}
+            }
+        } catch (java.io.IOException e) {
+            try {
+                plain.close();
+            } catch (Exception ignored) {}
+            throw e;
+        }
+    }
+
     private static String buildPrompt(String text, String from, String to) {
         String template = getPrompt();
         if (!template.contains("{text}")) {
@@ -148,6 +367,27 @@ public class GeminiTranslator {
             from = "auto-detected source language";
         }
         return template.replace("{from}", from).replace("{to}", to).replace("{text}", text);
+    }
+
+    private static String buildBodyJson(String prompt) throws org.json.JSONException {
+        JSONObject generationConfig = new JSONObject();
+        generationConfig.put("temperature", 0);
+        generationConfig.put("maxOutputTokens", 4096);
+
+        JSONObject part = new JSONObject();
+        part.put("text", prompt);
+
+        JSONObject content = new JSONObject();
+        JSONArray parts = new JSONArray();
+        parts.put(part);
+        content.put("parts", parts);
+
+        JSONObject body = new JSONObject();
+        JSONArray contents = new JSONArray();
+        contents.put(content);
+        body.put("contents", contents);
+        body.put("generationConfig", generationConfig);
+        return body.toString();
     }
 
     private static String baseCode(String lang) {
@@ -213,6 +453,34 @@ public class GeminiTranslator {
         final String prompt = buildPrompt(text, from, toFinal);
         final String model = getModel();
         new Thread(() -> {
+            // Redirect IP set: dial it directly (Xray freedom-style redirect).
+            if (activeRedirectIp() != null) {
+                try {
+                    HttpResult res = httpsExchange("POST", "/v1beta/models/" + model + ":generateContent", buildBodyJson(prompt));
+                    if (res.code == 429) {
+                        AndroidUtilities.runOnUIThread(() -> done.run(null, true));
+                        return;
+                    }
+                    if (res.code != 200) {
+                        AndroidUtilities.runOnUIThread(() -> done.run(null, false));
+                        return;
+                    }
+                    String result = parseResult(res.body);
+                    if (TextUtils.isEmpty(result)) {
+                        AndroidUtilities.runOnUIThread(() -> done.run(null, false));
+                        return;
+                    }
+                    synchronized (cache) {
+                        cache.put(cacheLookupKey, result);
+                    }
+                    final String finalResult = result;
+                    AndroidUtilities.runOnUIThread(() -> done.run(finalResult, false));
+                } catch (Exception e) {
+                    FileLog.e(e, false);
+                    AndroidUtilities.runOnUIThread(() -> done.run(null, false));
+                }
+                return;
+            }
             HttpURLConnection connection = null;
             try {
                 URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent");
@@ -224,25 +492,7 @@ public class GeminiTranslator {
                 connection.setReadTimeout(30000);
                 connection.setDoOutput(true);
 
-                JSONObject generationConfig = new JSONObject();
-                generationConfig.put("temperature", 0);
-                generationConfig.put("maxOutputTokens", 4096);
-
-                JSONObject part = new JSONObject();
-                part.put("text", prompt);
-
-                JSONObject content = new JSONObject();
-                JSONArray parts = new JSONArray();
-                parts.put(part);
-                content.put("parts", parts);
-
-                JSONObject body = new JSONObject();
-                JSONArray contents = new JSONArray();
-                contents.put(content);
-                body.put("contents", contents);
-                body.put("generationConfig", generationConfig);
-
-                byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
+                byte[] payload = buildBodyJson(prompt).getBytes(StandardCharsets.UTF_8);
                 connection.setFixedLengthStreamingMode(payload.length);
                 try (OutputStream out = connection.getOutputStream()) {
                     out.write(payload);
@@ -312,6 +562,31 @@ public class GeminiTranslator {
             }
         }
         new Thread(() -> {
+            // Redirect IP set: dial it directly (Xray freedom-style redirect).
+            if (activeRedirectIp() != null) {
+                try {
+                    HttpResult res = httpsExchange("GET", "/v1beta/models?pageSize=100", null);
+                    if (res.code != HttpURLConnection.HTTP_OK) {
+                        AndroidUtilities.runOnUIThread(() -> done.run(null));
+                        return;
+                    }
+                    ArrayList<String> models = parseModels(res.body);
+                    if (models == null) {
+                        AndroidUtilities.runOnUIThread(() -> done.run(null));
+                        return;
+                    }
+                    synchronized (GeminiTranslator.class) {
+                        cachedModels = new ArrayList<>(models);
+                        cachedModelsTime = System.currentTimeMillis();
+                    }
+                    final ArrayList<String> result = models;
+                    AndroidUtilities.runOnUIThread(() -> done.run(result));
+                } catch (Exception e) {
+                    FileLog.e(e, false);
+                    AndroidUtilities.runOnUIThread(() -> done.run(null));
+                }
+                return;
+            }
             HttpURLConnection connection = null;
             try {
                 URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models?pageSize=100");
@@ -331,42 +606,11 @@ public class GeminiTranslator {
                         buffer.append(line).append('\n');
                     }
                 }
-                ArrayList<String> models = new ArrayList<>();
-                JSONObject root = new JSONObject(buffer.toString());
-                JSONArray list = root.optJSONArray("models");
-                if (list != null) {
-                    for (int i = 0; i < list.length(); i++) {
-                        JSONObject m = list.optJSONObject(i);
-                        if (m == null) {
-                            continue;
-                        }
-                        String name = m.optString("name", "");
-                        if (name.startsWith("models/")) {
-                            name = name.substring("models/".length());
-                        }
-                        if (TextUtils.isEmpty(name)) {
-                            continue;
-                        }
-                        boolean canGenerate = false;
-                        JSONArray methods = m.optJSONArray("supportedGenerationMethods");
-                        if (methods != null) {
-                            for (int j = 0; j < methods.length(); j++) {
-                                if ("generateContent".equals(methods.optString(j))) {
-                                    canGenerate = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (canGenerate && !models.contains(name)) {
-                            models.add(name);
-                        }
-                    }
-                }
-                if (models.isEmpty()) {
+                ArrayList<String> models = parseModels(buffer.toString());
+                if (models == null) {
                     AndroidUtilities.runOnUIThread(() -> done.run(null));
                     return;
                 }
-                Collections.sort(models);
                 synchronized (GeminiTranslator.class) {
                     cachedModels = new ArrayList<>(models);
                     cachedModelsTime = System.currentTimeMillis();
@@ -382,6 +626,50 @@ public class GeminiTranslator {
                 }
             }
         }).start();
+    }
+
+    private static ArrayList<String> parseModels(String json) {
+        try {
+            ArrayList<String> models = new ArrayList<>();
+            JSONObject root = new JSONObject(json);
+            JSONArray list = root.optJSONArray("models");
+            if (list != null) {
+                for (int i = 0; i < list.length(); i++) {
+                    JSONObject m = list.optJSONObject(i);
+                    if (m == null) {
+                        continue;
+                    }
+                    String name = m.optString("name", "");
+                    if (name.startsWith("models/")) {
+                        name = name.substring("models/".length());
+                    }
+                    if (TextUtils.isEmpty(name)) {
+                        continue;
+                    }
+                    boolean canGenerate = false;
+                    JSONArray methods = m.optJSONArray("supportedGenerationMethods");
+                    if (methods != null) {
+                        for (int j = 0; j < methods.length(); j++) {
+                            if ("generateContent".equals(methods.optString(j))) {
+                                canGenerate = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (canGenerate && !models.contains(name)) {
+                        models.add(name);
+                    }
+                }
+            }
+            if (models.isEmpty()) {
+                return null;
+            }
+            Collections.sort(models);
+            return models;
+        } catch (Exception e) {
+            FileLog.e(e, false);
+            return null;
+        }
     }
 
     private static String parseResult(String json) {
