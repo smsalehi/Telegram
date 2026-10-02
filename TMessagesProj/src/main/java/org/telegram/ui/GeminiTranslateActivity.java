@@ -47,9 +47,10 @@ public class GeminiTranslateActivity extends BaseFragment {
     private static final int ROW_API_KEY = 3;
     private static final int ROW_REDIRECT = 4;
     private static final int ROW_PROMPT = 5;
-    private static final int ROW_SHADOW = 6;
-    private static final int ROW_INFO = 7;
-    private static final int ROW_COUNT = 8;
+    private static final int ROW_TEST = 6;
+    private static final int ROW_SHADOW = 7;
+    private static final int ROW_INFO = 8;
+    private static final int ROW_COUNT = 9;
 
     private RecyclerListView listView;
     private ListAdapter listAdapter;
@@ -107,6 +108,8 @@ public class GeminiTranslateActivity extends BaseFragment {
                 openApiKeyDialog(false);
             } else if (position == ROW_REDIRECT) {
                 openRedirectDialog();
+            } else if (position == ROW_TEST) {
+                runConnectionTest();
             } else if (position == ROW_MODEL) {
                 openModelDialog();
             } else if (position == ROW_PROMPT) {
@@ -180,6 +183,52 @@ public class GeminiTranslateActivity extends BaseFragment {
         });
         builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
         showDialog(builder.create());
+    }
+
+    private void runConnectionTest() {
+        if (getParentActivity() == null) {
+            return;
+        }
+        final AlertDialog progressDialog = new AlertDialog(getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER);
+        progressDialog.show();
+        GeminiTranslator.testConnection(res -> {
+            try {
+                progressDialog.dismiss();
+            } catch (Throwable ignored) {}
+            if (getParentActivity() == null) {
+                return;
+            }
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < res.log.size(); i++) {
+                if (i > 0) {
+                    sb.append('\n');
+                }
+                sb.append(res.log.get(i));
+            }
+            AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+            builder.setTitle(LocaleController.getString(res.ok ? R.string.GeminiTestOk : R.string.GeminiTestFailed));
+            LinearLayout layout = new LinearLayout(getParentActivity());
+            layout.setOrientation(LinearLayout.VERTICAL);
+            ScrollView scrollView = new ScrollView(getParentActivity());
+            final android.widget.TextView textView = new android.widget.TextView(getParentActivity());
+            textView.setTextSize(12);
+            textView.setTypeface(android.graphics.Typeface.MONOSPACE);
+            textView.setTextIsSelectable(true);
+            int pad = (int) (16 * getParentActivity().getResources().getDisplayMetrics().density);
+            textView.setPadding(pad, pad / 2, pad, pad / 2);
+            textView.setText(sb.toString());
+            scrollView.addView(textView, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP));
+            layout.addView(scrollView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, (int) (320 * getParentActivity().getResources().getDisplayMetrics().density)));
+            builder.setView(layout);
+            builder.setPositiveButton(LocaleController.getString(R.string.Copy), (dialog, which) -> {
+                try {
+                    android.content.ClipboardManager cm = (android.content.ClipboardManager) getParentActivity().getSystemService(Context.CLIPBOARD_SERVICE);
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("gemini-test", sb.toString()));
+                } catch (Throwable ignored) {}
+            });
+            builder.setNegativeButton(LocaleController.getString(R.string.Close), null);
+            showDialog(builder.create());
+        });
     }
 
     private void openModelDialog() {
@@ -261,7 +310,7 @@ public class GeminiTranslateActivity extends BaseFragment {
         public int getItemViewType(int position) {
             if (position == ROW_HEADER) return VIEW_TYPE_HEADER;
             if (position == ROW_ENABLE) return VIEW_TYPE_SWITCH;
-            if (position == ROW_MODEL || position == ROW_API_KEY || position == ROW_REDIRECT || position == ROW_PROMPT) return VIEW_TYPE_SETTINGS;
+            if (position == ROW_MODEL || position == ROW_API_KEY || position == ROW_REDIRECT || position == ROW_PROMPT || position == ROW_TEST) return VIEW_TYPE_SETTINGS;
             if (position == ROW_SHADOW) return VIEW_TYPE_SHADOW;
             return VIEW_TYPE_INFO;
         }
@@ -313,6 +362,8 @@ public class GeminiTranslateActivity extends BaseFragment {
                         cell.setTextAndValue(LocaleController.getString(R.string.GeminiRedirectIp), ip.isEmpty() ? LocaleController.getString(R.string.GeminiDirect) : ip, true);
                     } else if (position == ROW_PROMPT) {
                         cell.setTextAndValue(LocaleController.getString(R.string.GeminiPrompt), GeminiTranslator.isCustomPrompt() ? LocaleController.getString(R.string.GeminiCustom) : LocaleController.getString(R.string.GeminiDefault), true);
+                    } else if (position == ROW_TEST) {
+                        cell.setTextAndValue(LocaleController.getString(R.string.GeminiTest), "", false);
                     } else {
                         String key = GeminiTranslator.getApiKey();
                         cell.setTextAndValue(LocaleController.getString(R.string.GeminiApiKey), key.isEmpty() ? LocaleController.getString(R.string.GeminiNotSet) : GeminiTranslator.getMaskedKey(), true);

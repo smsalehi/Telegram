@@ -672,6 +672,144 @@ public class GeminiTranslator {
         }
     }
 
+    public static class TestResult {
+        public boolean ok;
+        public int httpCode = -1;
+        public String translated;
+        public String error;
+        public final ArrayList<String> log = new ArrayList<>();
+    }
+
+    private static void tlog(ArrayList<String> log, String line) {
+        if (log != null) {
+            log.add(line);
+        }
+    }
+
+    /**
+     * End-to-end self test: fa -> en translation of a fixed sentence, with a
+     * step-by-step log (settings, network/TLS, HTTP status, server body) for
+     * diagnosis. Works even when the master toggle is off; needs the API key.
+     * Always async; done runs on the UI thread, never null result object.
+     */
+    public static void testConnection(Utilities.Callback<TestResult> done) {
+        final TestResult res = new TestResult();
+        final String apiKey = getApiKey();
+        final boolean enabled = isEnabled();
+        final String redirect = activeRedirectIp();
+        final String model = getModel();
+        final String prompt = getPrompt();
+        new Thread(() -> {
+            tlog(res.log, "enabled=" + enabled);
+            if (TextUtils.isEmpty(apiKey)) {
+                res.error = "API key is empty";
+                tlog(res.log, "ERROR: API key is empty, enter it in settings");
+                AndroidUtilities.runOnUIThread(() -> done.run(res));
+                return;
+            }
+            tlog(res.log, "api key: length=" + apiKey.length() + " (" + getMaskedKey() + ")");
+            tlog(res.log, "route: " + (redirect != null ? "redirect TCP -> " + redirect + ":443, TLS SNI=" + GEMINI_HOST : "direct (system DNS)"));
+            tlog(res.log, "model=" + model);
+            tlog(res.log, "prompt: " + (isCustomPrompt() ? "custom" : "default") + " len=" + prompt.length());
+            String sample = "سلام، این یک آزمایش اتصال است";
+            String body;
+            try {
+                body = buildBodyJson(buildPrompt(sample, "fa", "en"));
+                tlog(res.log, "request body bytes=" + body.getBytes(StandardCharsets.UTF_8).length);
+            } catch (Exception e) {
+                res.error = "prompt build failed: " + e;
+                tlog(res.log, "ERROR: " + res.error);
+                AndroidUtilities.runOnUIThread(() -> done.run(res));
+                return;
+            }
+            if (redirect != null) {
+                tlog(res.log, "dial: TCP connect " + redirect + ":443 ...");
+                try {
+                    HttpResult r = httpsExchange("POST", "/v1beta/models/" + model + ":generateContent", body);
+                    res.httpCode = r.code;
+                    tlog(res.log, "TLS handshake + hostname verify: OK");
+                    tlog(res.log, "HTTP status=" + r.code);
+                    tlog(res.log, "response body: " + snippet(r.body));
+                    finishTest(res, r.code == 200 ? parseResult(r.body) : null, done);
+                } catch (Exception e) {
+                    res.error = e.getClass().getSimpleName() + ": " + e.getMessage();
+                    tlog(res.log, "ERROR: " + res.error);
+                    AndroidUtilities.runOnUIThread(() -> done.run(res));
+                }
+                return;
+            }
+            tlog(res.log, "dial: system DNS + TLS to " + GEMINI_HOST + " ...");
+            HttpURLConnection connection = null;
+            try {
+                URL url = new URL("https://" + GEMINI_HOST + "/v1beta/models/" + model + ":generateContent");
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("POST");
+                connection.setRequestProperty("Content-Type", "application/json");
+                connection.setRequestProperty("x-goog-api-key", apiKey);
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(30000);
+                connection.setDoOutput(true);
+                byte[] payload = body.getBytes(StandardCharsets.UTF_8);
+                connection.setFixedLengthStreamingMode(payload.length);
+                try (OutputStream out = connection.getOutputStream()) {
+                    out.write(payload);
+                    out.flush();
+                }
+                int code = connection.getResponseCode();
+                res.httpCode = code;
+                tlog(res.log, "HTTP status=" + code);
+                String respBody = "";
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(code == 200 ? connection.getInputStream() : connection.getErrorStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    StringBuilder sb = new StringBuilder();
+                    while ((line = reader.readLine()) != null) {
+                        sb.append(line).append('\n');
+                    }
+                    respBody = sb.toString();
+                } catch (Exception ignored) {}
+                tlog(res.log, "response body: " + snippet(respBody));
+                finishTest(res, code == 200 ? parseResult(respBody) : null, done);
+            } catch (Exception e) {
+                res.error = e.getClass().getSimpleName() + ": " + e.getMessage();
+                tlog(res.log, "ERROR: " + res.error);
+                AndroidUtilities.runOnUIThread(() -> done.run(res));
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
+        }).start();
+    }
+
+    private static void finishTest(TestResult res, String translated, Utilities.Callback<TestResult> done) {
+        if (!TextUtils.isEmpty(translated)) {
+            res.ok = true;
+            res.translated = translated;
+            tlog(res.log, "translated: " + translated);
+            tlog(res.log, "RESULT: OK");
+        } else {
+            res.ok = false;
+            if (res.httpCode == 429) {
+                res.error = "rate limited (HTTP 429)";
+            } else if (res.error == null) {
+                res.error = res.httpCode <= 0 ? "no response" : "HTTP " + res.httpCode + " (bad key/model or blocked?)";
+            }
+            tlog(res.log, "RESULT: FAILED (" + res.error + ")");
+        }
+        AndroidUtilities.runOnUIThread(() -> done.run(res));
+    }
+
+    private static String snippet(String body) {
+        if (body == null) {
+            return "<empty>";
+        }
+        String oneLine = body.replace('\n', ' ').replace('\r', ' ').trim();
+        if (oneLine.length() > 500) {
+            return oneLine.substring(0, 500) + " ...[truncated, total " + body.length() + " chars]";
+        }
+        return oneLine.isEmpty() ? "<empty>" : oneLine;
+    }
+
     private static String parseResult(String json) {
         try {
             JSONObject root = new JSONObject(json);

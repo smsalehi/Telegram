@@ -11327,6 +11327,9 @@
     <string name="GeminiRedirectHint">e.g. 142.250.72.10, empty = direct</string>
     <string name="GeminiDirect">Direct</string>
     <string name="GeminiInvalidIp">Invalid IPv4 address</string>
+    <string name="GeminiTest">Test connection</string>
+    <string name="GeminiTestOk">Test passed</string>
+    <string name="GeminiTestFailed">Test failed</string>
     <string name="ConnectionSettings">Connection Settings</string>
     <string name="DirectSettings">Direct Settings</string>
     <string name="ModifyDirectPort">Modify Direct connection port</string>
