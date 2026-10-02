@@ -295,6 +295,10 @@ void ConnectionsManager::select() {
             if (llabs(now - lastPingTime) >= (testBackend ? 2000 : 19000)) {
                 lastPingTime = now;
                 sendPing(datacenter, false);
+                Connection *httpConnection = datacenter->getGenericConnection(false, 0);
+                if (httpConnection != nullptr && httpConnection->isHttpTransport()) {
+                    sendHttpWait(httpConnection);
+                }
             }
             if (abs((int32_t) (now / 1000) - lastDcUpdateTime) >= DC_UPDATE_TIME) {
                 updateDcSettings(0, false, false);
@@ -1804,6 +1808,30 @@ void ConnectionsManager::sendPing(Datacenter *datacenter, bool usePushConnection
     } else {
         sendingPing = true;
     }
+    connection->sendData(transportData, false, true);
+}
+
+void ConnectionsManager::sendHttpWait(Connection *connection) {
+    Datacenter *datacenter = connection->getDatacenter();
+    if (connection->getConnectionToken() == 0
+            || !datacenter->hasAuthKey(connection->getConnectionType(), 0)) {
+        return;
+    }
+    auto request = new TL_http_wait();
+    request->max_delay = 100;
+    request->wait_after = 30;
+    request->max_wait = 25000;
+
+    auto networkMessage = new NetworkMessage();
+    networkMessage->message = std::make_unique<TL_message>();
+    networkMessage->message->msg_id = generateMessageId();
+    networkMessage->message->bytes = request->getObjectSize();
+    networkMessage->message->body = std::unique_ptr<TLObject>(request);
+    networkMessage->message->seqno = connection->generateMessageSeqNo(false);
+
+    std::vector<std::unique_ptr<NetworkMessage>> array;
+    array.push_back(std::unique_ptr<NetworkMessage>(networkMessage));
+    NativeByteBuffer *transportData = datacenter->createRequestsData(array, nullptr, connection, false);
     connection->sendData(transportData, false, true);
 }
 
