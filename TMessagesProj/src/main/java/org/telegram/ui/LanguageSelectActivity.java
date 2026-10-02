@@ -28,6 +28,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.GeminiTranslator;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
@@ -220,7 +221,7 @@ public class LanguageSelectActivity extends BaseFragment implements Notification
                         NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.updateSearchSettings);
                     } else if (position == autoTranslationPosition) {
                         boolean value = !getChatValue();
-                        if (value && !getUserConfig().isPremium()) {
+                        if (value && !getUserConfig().isPremium() && !GeminiTranslator.isEnabled()) {
                             showDialog(new PremiumFeatureBottomSheet(LanguageSelectActivity.this, PremiumPreviewFragment.PREMIUM_FEATURE_TRANSLATIONS, false));
                             return;
                         }
@@ -249,6 +250,10 @@ public class LanguageSelectActivity extends BaseFragment implements Notification
                     }
                     return;
                 } else if (view instanceof TextSettingsCell) {
+                    if (position == geminiTranslatePosition) {
+                        presentFragment(new GeminiTranslateActivity());
+                        return;
+                    }
 //                    if (listAdapter.getItemViewType(position) == VIEW_TYPE_SETTINGS_2) {
 //                        final ArrayList<String> languages = new ArrayList<>();
 //                        for (int i = 0; i < translationModels.size(); ++i) {
@@ -578,6 +583,7 @@ public class LanguageSelectActivity extends BaseFragment implements Notification
     private int autoTranslationPosition = -1;
     @Keep
     private int doNotTranslatePosition = -1;
+    private int geminiTranslatePosition = -1;
     private int infoPosition1;
     private int languagesStartsPosition;
 
@@ -607,6 +613,7 @@ public class LanguageSelectActivity extends BaseFragment implements Notification
             } else {
                 int count = 0;
                 count++;
+                count++; // gemini translate row
                 if (getMessagesController().isTranslationsManualEnabled() || getMessagesController().isTranslationsAutoEnabled()) {
                     count++;
                     if (getMessagesController().isTranslationsManualEnabled()) {
@@ -764,13 +771,8 @@ public class LanguageSelectActivity extends BaseFragment implements Notification
                 case VIEW_TYPE_SETTINGS_2: {
                     TextSettingsCell settingsCell = (TextSettingsCell) holder.itemView;
                     settingsCell.updateRTL();
-//                    if (translationModels != null) {
-//                        ArrayList<String> languages = new ArrayList<>();
-//                        for (int i = 0; i < translationModels.size(); ++i) {
-//                            languages.add(TranslateAlert2.languageName(translationModels.get(i)));
-//                        }
-//                        settingsCell.setTextAndValue("Delete Translation Models", languages.size() >= 3 ? languages.size() + " models" : TextUtils.join(", ", languages), false);
-//                    }
+                    String key = GeminiTranslator.getApiKey();
+                    settingsCell.setTextAndValue(LocaleController.getString(R.string.GeminiTranslate), GeminiTranslator.isEnabled() && !key.isEmpty() ? GeminiTranslator.getMaskedKey() : LocaleController.getString(R.string.GeminiNotSet), true);
                     break;
                 }
                 case VIEW_TYPE_SWITCH: {
@@ -781,7 +783,7 @@ public class LanguageSelectActivity extends BaseFragment implements Notification
                         cell.setCheckBoxIcon(0);
                     } else if (position == autoTranslationPosition) {
                         cell.setTextAndCheck(LocaleController.getString(R.string.ShowTranslateChatButton), getChatValue(), getContextValue() || getChatValue());
-                        cell.setCheckBoxIcon(!getUserConfig().isPremium() ? R.drawable.permission_locked : 0);
+                        cell.setCheckBoxIcon(!getUserConfig().isPremium() && !GeminiTranslator.isEnabled() ? R.drawable.permission_locked : 0);
                     }
                     break;
                 }
@@ -815,6 +817,8 @@ public class LanguageSelectActivity extends BaseFragment implements Notification
                 if (getMessagesController().isTranslationsManualEnabled() || getMessagesController().isTranslationsAutoEnabled()) {
                     settingsFromPosition = position - i;
                     if (i-- == 0) return VIEW_TYPE_HEADER;
+                    geminiTranslatePosition = position;
+                    if (i-- == 0) return VIEW_TYPE_SETTINGS_2;
                     if (getMessagesController().isTranslationsManualEnabled()) {
                         if (i-- == 0) {
                             manualTranslationPosition = position;

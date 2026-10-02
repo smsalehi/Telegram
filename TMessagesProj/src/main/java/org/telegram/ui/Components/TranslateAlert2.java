@@ -53,6 +53,7 @@ import org.json.JSONArray;
 import org.json.JSONTokener;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.Emoji;
+import org.telegram.messenger.GeminiTranslator;
 import org.telegram.messenger.LanguageDetector;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
@@ -314,7 +315,7 @@ public class TranslateAlert2 extends BottomSheet implements NotificationCenter.N
         }
 
         final String method = MessagesController.getInstance(currentAccount).translationsManualEnabled;
-        if ("alternative".equalsIgnoreCase(method)) {
+        if ("alternative".equalsIgnoreCase(method) || GeminiTranslator.isEnabled()) {
             translateAlt();
             return;
         }/* else if ("system".equalsIgnoreCase(method)) {
@@ -520,6 +521,18 @@ public class TranslateAlert2 extends BottomSheet implements NotificationCenter.N
 
     public static void alternativeTranslate(String text, String fromLng, String toLng, Utilities.Callback2<String, Boolean> done) {
         if (done == null) return;
+        if (GeminiTranslator.isEnabled()) {
+            if (fromLng == null) {
+                LanguageDetector.detectLanguage(text, lng -> {
+                    alternativeTranslate(text, lng, toLng, done);
+                }, e -> {
+                    alternativeTranslate(text, "en", toLng, done);
+                });
+                return;
+            }
+            GeminiTranslator.translate(text, fromLng, toLng, done);
+            return;
+        }
         if (fromLng == null) {
             LanguageDetector.detectLanguage(text, lng -> {
                 alternativeTranslate(text, lng, toLng, done);

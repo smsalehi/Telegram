@@ -11320,4 +11320,10 @@
     <string name="RoundVideoComposition">Composition</string>
     <string name="RoundVideoCompositionEnabled">Round video styling</string>
     <string name="RoundVideoCompositionInfo">Disable styling to record a plain square without outside-circle blur, dimming or Telegram overlays.</string>
+    <string name="GeminiTranslate">Gemini Translate</string>
+    <string name="GeminiTranslateEnable">Translate with Gemini</string>
+    <string name="GeminiApiKey">Gemini API key</string>
+    <string name="GeminiApiKeyHint">Paste your Gemini API key</string>
+    <string name="GeminiNotSet">Not set</string>
+    <string name="GeminiTranslateInfo">When enabled, non-English messages are translated to English with your own Gemini API key, using the regular Translate button and per-chat auto-translate. Language detection runs on this device. Translated texts are sent to Google. Do not use it in secret chats.</string>
 </resources>
