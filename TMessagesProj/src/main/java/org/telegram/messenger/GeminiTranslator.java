@@ -13,7 +13,10 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -276,6 +279,103 @@ public class GeminiTranslator {
             } catch (Exception e) {
                 FileLog.e(e, false);
                 AndroidUtilities.runOnUIThread(() -> done.run(null, false));
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
+        }).start();
+    }
+
+    private static ArrayList<String> cachedModels;
+    private static long cachedModelsTime;
+
+    /**
+     * Fetch the model list from Google (models.list). Always async; done runs
+     * on the UI thread with the model names (without "models/" prefix), or
+     * null on failure (caller should fall back to MODELS).
+     */
+    public static void fetchModels(Utilities.Callback<ArrayList<String>> done) {
+        if (done == null) {
+            return;
+        }
+        final String apiKey = getApiKey();
+        if (TextUtils.isEmpty(apiKey)) {
+            AndroidUtilities.runOnUIThread(() -> done.run(null));
+            return;
+        }
+        synchronized (GeminiTranslator.class) {
+            if (cachedModels != null && System.currentTimeMillis() - cachedModelsTime < 24 * 60 * 60 * 1000L) {
+                final ArrayList<String> copy = new ArrayList<>(cachedModels);
+                AndroidUtilities.runOnUIThread(() -> done.run(copy));
+                return;
+            }
+        }
+        new Thread(() -> {
+            HttpURLConnection connection = null;
+            try {
+                URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models?pageSize=100");
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("GET");
+                connection.setRequestProperty("x-goog-api-key", apiKey);
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(30000);
+                if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                    AndroidUtilities.runOnUIThread(() -> done.run(null));
+                    return;
+                }
+                StringBuilder buffer = new StringBuilder();
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        buffer.append(line).append('\n');
+                    }
+                }
+                ArrayList<String> models = new ArrayList<>();
+                JSONObject root = new JSONObject(buffer.toString());
+                JSONArray list = root.optJSONArray("models");
+                if (list != null) {
+                    for (int i = 0; i < list.length(); i++) {
+                        JSONObject m = list.optJSONObject(i);
+                        if (m == null) {
+                            continue;
+                        }
+                        String name = m.optString("name", "");
+                        if (name.startsWith("models/")) {
+                            name = name.substring("models/".length());
+                        }
+                        if (TextUtils.isEmpty(name)) {
+                            continue;
+                        }
+                        boolean canGenerate = false;
+                        JSONArray methods = m.optJSONArray("supportedGenerationMethods");
+                        if (methods != null) {
+                            for (int j = 0; j < methods.length(); j++) {
+                                if ("generateContent".equals(methods.optString(j))) {
+                                    canGenerate = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (canGenerate && !models.contains(name)) {
+                            models.add(name);
+                        }
+                    }
+                }
+                if (models.isEmpty()) {
+                    AndroidUtilities.runOnUIThread(() -> done.run(null));
+                    return;
+                }
+                Collections.sort(models);
+                synchronized (GeminiTranslator.class) {
+                    cachedModels = new ArrayList<>(models);
+                    cachedModelsTime = System.currentTimeMillis();
+                }
+                final ArrayList<String> result = models;
+                AndroidUtilities.runOnUIThread(() -> done.run(result));
+            } catch (Exception e) {
+                FileLog.e(e, false);
+                AndroidUtilities.runOnUIThread(() -> done.run(null));
             } finally {
                 if (connection != null) {
                     connection.disconnect();

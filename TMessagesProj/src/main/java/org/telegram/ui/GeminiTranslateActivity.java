@@ -150,18 +150,34 @@ public class GeminiTranslateActivity extends BaseFragment {
         if (getParentActivity() == null) {
             return;
         }
-        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
-        builder.setTitle(LocaleController.getString(R.string.GeminiModel));
-        builder.setItems(GeminiTranslator.MODELS, (dialog, which) -> {
-            if (which >= 0 && which < GeminiTranslator.MODELS.length) {
-                GeminiTranslator.setModel(GeminiTranslator.MODELS[which]);
-                if (listAdapter != null) {
-                    listAdapter.notifyItemChanged(ROW_MODEL);
-                }
+        final AlertDialog progressDialog = new AlertDialog(getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER);
+        progressDialog.show();
+        GeminiTranslator.fetchModels(models -> {
+            try {
+                progressDialog.dismiss();
+            } catch (Throwable ignored) {}
+            if (getParentActivity() == null) {
+                return;
             }
+            final String[] items;
+            if (models != null && !models.isEmpty()) {
+                items = models.toArray(new String[0]);
+            } else {
+                items = GeminiTranslator.MODELS;
+            }
+            AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+            builder.setTitle(LocaleController.getString(R.string.GeminiModel));
+            builder.setItems(items, (dialog, which) -> {
+                if (which >= 0 && which < items.length) {
+                    GeminiTranslator.setModel(items[which]);
+                    if (listAdapter != null) {
+                        listAdapter.notifyItemChanged(ROW_MODEL);
+                    }
+                }
+            });
+            builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
+            showDialog(builder.create());
         });
-        builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
-        showDialog(builder.create());
     }
 
     private void openPromptDialog() {
