@@ -33,9 +33,19 @@ public class GeminiTranslator {
     private static final String PREFS = "mainconfig";
     private static final String KEY_ENABLED = "gemini_translate_enabled";
     private static final String KEY_API_KEY = "gemini_translate_key";
+    private static final String KEY_MODEL = "gemini_translate_model";
+    private static final String KEY_PROMPT = "gemini_translate_prompt";
 
-    private static final String MODEL = "gemini-2.0-flash";
-    private static final String ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL + ":generateContent";
+    public static final String[] MODELS = new String[]{
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+            "gemini-2.5-flash"
+    };
+    public static final String DEFAULT_MODEL = MODELS[0];
+    public static final String DEFAULT_PROMPT =
+            "Translate the following text from {from} to {to}. " +
+            "Output only the translation, without explanations, quotes or extra formatting. " +
+            "If the text is already in {to}, return it unchanged:\n\n{text}";
 
     private static SharedPreferences prefs() {
         Context ctx = ApplicationLoader.applicationContext;
@@ -80,6 +90,61 @@ public class GeminiTranslator {
             return "****";
         }
         return "****" + key.substring(key.length() - 4);
+    }
+
+    public static String getModel() {
+        try {
+            String model = prefs().getString(KEY_MODEL, DEFAULT_MODEL);
+            if (TextUtils.isEmpty(model)) {
+                return DEFAULT_MODEL;
+            }
+            return model;
+        } catch (Throwable e) {
+            return DEFAULT_MODEL;
+        }
+    }
+
+    public static void setModel(String model) {
+        try {
+            prefs().edit().putString(KEY_MODEL, TextUtils.isEmpty(model) ? DEFAULT_MODEL : model).apply();
+        } catch (Throwable ignored) {}
+    }
+
+    public static String getPrompt() {
+        try {
+            String prompt = prefs().getString(KEY_PROMPT, DEFAULT_PROMPT);
+            if (TextUtils.isEmpty(prompt)) {
+                return DEFAULT_PROMPT;
+            }
+            return prompt;
+        } catch (Throwable e) {
+            return DEFAULT_PROMPT;
+        }
+    }
+
+    public static void setPrompt(String prompt) {
+        try {
+            prefs().edit().putString(KEY_PROMPT, prompt == null ? "" : prompt).apply();
+        } catch (Throwable ignored) {}
+    }
+
+    public static boolean isCustomPrompt() {
+        try {
+            return prefs().contains(KEY_PROMPT) && !TextUtils.isEmpty(prefs().getString(KEY_PROMPT, ""));
+        } catch (Throwable e) {
+            return false;
+        }
+    }
+
+    private static String buildPrompt(String text, String from, String to) {
+        String template = getPrompt();
+        if (!template.contains("{text}")) {
+            template = DEFAULT_PROMPT;
+        }
+        if (TextUtils.isEmpty(from)) {
+            from = "auto-detected source language";
+        }
+        return template.replace("{from}", from).replace("{to}", to).replace("{text}", text);
     }
 
     private static String baseCode(String lang) {
@@ -142,11 +207,12 @@ public class GeminiTranslator {
                 return;
             }
         }
-        final String promptFrom = TextUtils.isEmpty(from) ? "auto-detected source language" : from;
+        final String prompt = buildPrompt(text, from, toFinal);
+        final String model = getModel();
         new Thread(() -> {
             HttpURLConnection connection = null;
             try {
-                URL url = new URL(ENDPOINT);
+                URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent");
                 connection = (HttpURLConnection) url.openConnection();
                 connection.setRequestMethod("POST");
                 connection.setRequestProperty("Content-Type", "application/json");
@@ -160,9 +226,7 @@ public class GeminiTranslator {
                 generationConfig.put("maxOutputTokens", 4096);
 
                 JSONObject part = new JSONObject();
-                part.put("text", "Translate the following text from " + promptFrom + " to " + toFinal +
-                        ". Output only the translation, without explanations, quotes or extra formatting. " +
-                        "If the text is already in " + toFinal + ", return it unchanged:\n\n" + text);
+                part.put("text", prompt);
 
                 JSONObject content = new JSONObject();
                 JSONArray parts = new JSONArray();

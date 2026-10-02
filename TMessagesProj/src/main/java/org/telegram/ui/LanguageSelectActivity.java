@@ -817,8 +817,10 @@ public class LanguageSelectActivity extends BaseFragment implements Notification
                 if (getMessagesController().isTranslationsManualEnabled() || getMessagesController().isTranslationsAutoEnabled()) {
                     settingsFromPosition = position - i;
                     if (i-- == 0) return VIEW_TYPE_HEADER;
-                    geminiTranslatePosition = position;
-                    if (i-- == 0) return VIEW_TYPE_SETTINGS_2;
+                    if (i-- == 0) {
+                        geminiTranslatePosition = position;
+                        return VIEW_TYPE_SETTINGS_2;
+                    }
                     if (getMessagesController().isTranslationsManualEnabled()) {
                         if (i-- == 0) {
                             manualTranslationPosition = position;
