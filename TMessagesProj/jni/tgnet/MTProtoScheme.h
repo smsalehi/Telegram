@@ -669,6 +669,19 @@ public:
     void serializeToStream(NativeByteBuffer *stream);
 };
 
+class TL_http_wait : public TLObject {
+
+public:
+    static const uint32_t constructor = 0x1f2f6c8d;
+
+    int32_t max_delay;
+    int32_t wait_after;
+    int32_t max_wait;
+
+    TLObject *deserializeResponse(NativeByteBuffer *stream, uint32_t constructor, int32_t instanceNum, bool &error);
+    void serializeToStream(NativeByteBuffer *stream);
+};
+
 class TL_destroy_session : public TLObject {
 
 public:
