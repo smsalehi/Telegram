@@ -87,6 +87,7 @@ public:
     void receivedIntegrityCheckClassic(int32_t requestToken, std::string nonce, std::string token);
     void receivedCaptchaResult(int32_t requestTokensCount, int32_t* requestTokens, std::string token);
     void moveToDatacenter(uint32_t datacenterId);
+    void sendHttpWait(Connection *connection);
 
 private:
     static void *ThreadProc(void *data);
