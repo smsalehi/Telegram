@@ -878,6 +878,18 @@ void TL_ping_delay_disconnect::serializeToStream(NativeByteBuffer *stream) {
     stream->writeInt32(disconnect_delay);
 }
 
+TLObject *TL_http_wait::deserializeResponse(NativeByteBuffer *stream, uint32_t constructor, int32_t instanceNum, bool &error) {
+    // response is Vector<long>; this request is never registered, so it is ignored
+    return nullptr;
+}
+
+void TL_http_wait::serializeToStream(NativeByteBuffer *stream) {
+    stream->writeInt32(constructor);
+    stream->writeInt32(max_delay);
+    stream->writeInt32(wait_after);
+    stream->writeInt32(max_wait);
+}
+
 TLObject *TL_destroy_session::deserializeResponse(NativeByteBuffer *stream, uint32_t constructor, int32_t instanceNum, bool &error) {
     return DestroySessionRes::TLdeserialize(stream, constructor, instanceNum, error);
 }
