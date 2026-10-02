@@ -281,6 +281,10 @@ void setIpStrategy(JNIEnv *env, jclass c, jint instanceNum, jbyte value) {
     ConnectionsManager::getInstance(instanceNum).setIpStrategy((uint8_t) value);
 }
 
+void setDirectPortMode(JNIEnv *env, jclass c, jint instanceNum, jint mode) {
+    ConnectionsManager::getInstance(instanceNum).setDirectPortMode((int32_t) mode);
+}
+
 void setNetworkAvailable(JNIEnv *env, jclass c, jint instanceNum, jboolean value, jint networkType, jboolean slow) {
     ConnectionsManager::getInstance(instanceNum).setNetworkAvailable(value, networkType, slow);
 }
@@ -549,6 +553,7 @@ static JNINativeMethod ConnectionsManagerMethods[] = {
         {"native_updateDcSettings", "(I)V", (void *) updateDcSettings},
         {"native_moveDatacenter", "(II)V", (void *) moveDatacenter},
         {"native_setIpStrategy", "(IB)V", (void *) setIpStrategy},
+        {"native_setDirectPortMode", "(II)V", (void *) setDirectPortMode},
         {"native_setNetworkAvailable", "(IZIZ)V", (void *) setNetworkAvailable},
         {"native_setPushConnectionEnabled", "(IZ)V", (void *) setPushConnectionEnabled},
         {"native_setJava", "(Z)V", (void *) setJava},

@@ -11327,6 +11327,14 @@
     <string name="GeminiRedirectHint">e.g. 142.250.72.10, empty = direct</string>
     <string name="GeminiDirect">Direct</string>
     <string name="GeminiInvalidIp">Invalid IPv4 address</string>
+    <string name="ConnectionSettings">Connection Settings</string>
+    <string name="DirectSettings">Direct Settings</string>
+    <string name="ModifyDirectPort">Modify Direct connection port</string>
+    <string name="DirectPort">Port</string>
+    <string name="DirectPortAuto">Auto</string>
+    <string name="DirectPortHttps">HTTPS</string>
+    <string name="DirectPortHttp">HTTP</string>
+    <string name="DirectSettingsInfo">Auto tries all ports (80, 443, 5222). HTTPS only uses port 443 with TLS. HTTP only uses port 80 with plain-HTTP transport. Only direct connections are affected, proxy settings are untouched.</string>
     <string name="GeminiApiKey">Gemini API key</string>
     <string name="GeminiApiKeyHint">Paste your Gemini API key</string>
     <string name="GeminiPrompt">Prompt</string>

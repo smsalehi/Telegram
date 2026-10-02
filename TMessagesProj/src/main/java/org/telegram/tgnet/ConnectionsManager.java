@@ -632,6 +632,7 @@ public class ConnectionsManager extends BaseController {
             FileLog.d("selected ip strategy " + selectedStrategy);
         }
         native_setIpStrategy(currentAccount, selectedStrategy);
+        native_setDirectPortMode(currentAccount, getDirectPortModeSetting());
         native_setNetworkAvailable(currentAccount, ApplicationLoader.isNetworkOnline(), ApplicationLoader.getCurrentNetworkType(), ApplicationLoader.isConnectionSlow());
     }
 
@@ -1175,6 +1176,7 @@ public class ConnectionsManager extends BaseController {
     public static native int native_isTestBackend(int currentAccount);
     public static native void native_pauseNetwork(int currentAccount);
     public static native void native_setIpStrategy(int currentAccount, byte value);
+    public static native void native_setDirectPortMode(int currentAccount, int mode);
     public static native void native_updateDcSettings(int currentAccount);
     public static native void native_moveDatacenter(int currentAccount, int datacenterId);
     public static native void native_setNetworkAvailable(int currentAccount, boolean value, int networkType, boolean slow);
@@ -1234,6 +1236,35 @@ public class ConnectionsManager extends BaseController {
                 AccountInstance.getInstance(currentAccount).getNotificationCenter().postNotificationName(NotificationCenter.didUpdateConnectionState);
             }
         });
+    }
+
+    public final static int DIRECT_PORT_AUTO = 0;
+    public final static int DIRECT_PORT_HTTPS = 1;
+    public final static int DIRECT_PORT_HTTP = 2;
+
+    public static int getDirectPortModeSetting() {
+        try {
+            SharedPreferences prefs = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
+            if (!prefs.getBoolean("direct_port_modify", false)) {
+                return DIRECT_PORT_AUTO;
+            }
+            int mode = prefs.getInt("direct_port_mode", DIRECT_PORT_AUTO);
+            if (mode < DIRECT_PORT_AUTO || mode > DIRECT_PORT_HTTP) {
+                return DIRECT_PORT_AUTO;
+            }
+            return mode;
+        } catch (Throwable e) {
+            return DIRECT_PORT_AUTO;
+        }
+    }
+
+    public static void applyDirectPortMode() {
+        int mode = getDirectPortModeSetting();
+        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+            try {
+                native_setDirectPortMode(a, mode);
+            } catch (Throwable ignored) {}
+        }
     }
 
     @SuppressLint("NewApi")

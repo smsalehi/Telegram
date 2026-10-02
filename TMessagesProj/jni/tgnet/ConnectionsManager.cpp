@@ -3892,6 +3892,22 @@ void ConnectionsManager::setIpStrategy(uint8_t value) {
     });
 }
 
+void ConnectionsManager::setDirectPortMode(int32_t mode) {
+    scheduleTask([&, mode] {
+        if (directPortMode == mode) {
+            return;
+        }
+        directPortMode = mode;
+        for (auto & datacenter : datacenters) {
+            datacenter.second->suspendConnections(true);
+        }
+    });
+}
+
+int32_t ConnectionsManager::getDirectPortMode() {
+    return directPortMode;
+}
+
 int64_t ConnectionsManager::checkProxy(std::string address, uint16_t port, std::string username, std::string password, std::string secret, onRequestTimeFunc requestTimeFunc, jobject ptr1) {
     auto proxyCheckInfo = new ProxyCheckInfo();
     proxyCheckInfo->address = address;

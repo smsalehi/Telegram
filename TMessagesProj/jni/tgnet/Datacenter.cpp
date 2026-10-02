@@ -338,6 +338,10 @@ int32_t Datacenter::getCurrentPort(uint32_t flags) {
     if (!address->secret.empty()) {
         port = -1;
     } else {
+        int32_t directMode = ConnectionsManager::getInstance(instanceNum).getDirectPortMode();
+        if (directMode == 1 || directMode == 2) {
+            currentPortNum = directMode == 1 ? 1 : 0;
+        }
         port = defaultPorts[currentPortNum];
     }
     if (port == -1) {
@@ -409,7 +413,16 @@ void Datacenter::nextAddressOrPort(uint32_t flags) {
         TcpAddress *currentAddress = &((*addresses)[currentAddressNum]);
         tryNextPort = (currentAddress->flags & TcpAddressFlagStatic) == 0;
     }
-    if (tryNextPort && currentPortNum + 1 < 4) {
+    int32_t directMode = ConnectionsManager::getInstance(instanceNum).getDirectPortMode();
+    if (directMode == 1 || directMode == 2) {
+        currentPortNum = directMode == 1 ? 1 : 0;
+        if (currentAddressNum + 1 < addresses->size()) {
+            currentAddressNum++;
+        } else {
+            repeatCheckingAddresses = true;
+            currentAddressNum = 0;
+        }
+    } else if (tryNextPort && currentPortNum + 1 < 4) {
         currentPortNum++;
     } else {
         if (currentAddressNum + 1 < addresses->size()) {
