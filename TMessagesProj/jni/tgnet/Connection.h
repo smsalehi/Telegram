@@ -41,6 +41,7 @@ public:
     int8_t getConnectionNum();
     Datacenter *getDatacenter();
     bool isSuspended();
+    bool isHttpTransport();
     static bool isMediaConnectionType(ConnectionType type);
 
 protected:
@@ -65,12 +66,16 @@ private:
         ProtocolTypeEF,
         ProtocolTypeEE,
         ProtocolTypeDD,
-        ProtocolTypeTLS
+        ProtocolTypeTLS,
+        ProtocolTypeHTTP
     };
 
     inline void encryptKeyWithSecret(uint8_t *array, uint8_t secretType);
     inline std::string *getCurrentSecret(uint8_t secretType);
     void onDisconnectedInternal(int32_t reason, int32_t error);
+    bool useHttpTransport();
+    void processHttpData(NativeByteBuffer *buffer);
+    void resetHttpState();
 
     ProtocolType currentProtocolType = ProtocolTypeEE;
 
@@ -87,6 +92,9 @@ private:
     bool firstPacketSent = false;
     NativeByteBuffer *restOfTheData = nullptr;
     uint32_t lastPacketLength = 0;
+    NativeByteBuffer *httpRestBuffer = nullptr;
+    uint32_t httpContentLength = 0;
+    uint32_t httpInFlight = 0;
     bool hasSomeDataSinceLastConnect = false;
     bool isTryingNextPort = false;
     bool wasConnected = false;
