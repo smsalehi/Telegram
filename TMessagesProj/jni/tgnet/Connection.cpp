@@ -8,6 +8,7 @@
 
 #include <openssl/rand.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <cstring>
 #include <openssl/sha.h>
 #include <algorithm>
@@ -59,6 +60,7 @@ void Connection::suspendConnection(bool idle) {
     ConnectionsManager::getInstance(currentDatacenter->instanceNum).onConnectionClosed(this, 0);
     generation++;
     firstPacketSent = false;
+    resetHttpState();
     if (restOfTheData != nullptr) {
         restOfTheData->reuse();
         restOfTheData = nullptr;
@@ -69,6 +71,10 @@ void Connection::suspendConnection(bool idle) {
 }
 
 void Connection::onReceivedData(NativeByteBuffer *buffer) {
+    if (currentProtocolType == ProtocolTypeHTTP) {
+        processHttpData(buffer);
+        return;
+    }
     AES_ctr128_encrypt(buffer->bytes(), buffer->bytes(), buffer->limit(), &decryptKey, decryptIv, decryptCount, &decryptNum);
     
     failedConnectionCount = 0;
@@ -380,7 +386,9 @@ void Connection::connect() {
             setTimeout(25);
         }
     } else {
-        if (isTryingNextPort) {
+        if (useHttpTransport()) {
+            setTimeout(40);
+        } else if (isTryingNextPort) {
             setTimeout(8);
         } else {
             setTimeout(12);
@@ -424,7 +432,7 @@ void Connection::setHasUsefullData() {
 }
 
 bool Connection::allowsCustomPadding() {
-    return currentProtocolType == ProtocolTypeTLS || currentProtocolType == ProtocolTypeDD || currentProtocolType == ProtocolTypeEF;
+    return currentProtocolType == ProtocolTypeTLS || currentProtocolType == ProtocolTypeDD || currentProtocolType == ProtocolTypeEF || currentProtocolType == ProtocolTypeHTTP;
 }
 
 void Connection::sendData(NativeByteBuffer *buff, bool reportAck, bool encrypted) {
@@ -468,8 +476,36 @@ void Connection::sendData(NativeByteBuffer *buff, bool reportAck, bool encrypted
                 currentProtocolType = ProtocolTypeEF;
             }
         } else {
-            currentProtocolType = ProtocolTypeEF;
+            currentProtocolType = useHttpTransport() ? ProtocolTypeHTTP : ProtocolTypeEF;
         }
+    }
+
+    if (currentProtocolType == ProtocolTypeHTTP) {
+        buff->rewind();
+        uint32_t contentLength = buff->limit();
+        char headers[256];
+        int headersLen = snprintf(headers, sizeof(headers),
+                "POST /api HTTP/1.1\r\n"
+                "Host: %s\r\n"
+                "Content-Type: application/x-www-form-urlencoded\r\n"
+                "Content-Length: %u\r\n"
+                "Connection: keep-alive\r\n"
+                "User-Agent: TelegramDesktop\r\n"
+                "\r\n",
+                hostAddress.c_str(), contentLength);
+        if (headersLen <= 0 || (size_t) headersLen >= sizeof(headers)) {
+            buff->reuse();
+            reconnect();
+            return;
+        }
+        NativeByteBuffer *buffer = BuffersStorage::getInstance().getFreeBuffer((uint32_t) headersLen);
+        buffer->writeBytes((uint8_t *) headers, (uint32_t) headersLen);
+        buffer->rewind();
+        writeBuffer(buffer);
+        writeBuffer(buff);
+        httpInFlight++;
+        firstPacketSent = true;
+        return;
     }
 
     uint32_t additinalPacketSize = 0;
@@ -654,6 +690,192 @@ inline void Connection::encryptKeyWithSecret(uint8_t *bytes, uint8_t secretType)
     SHA256_Final(bytes, &sha256Ctx);
 }
 
+static bool httpCaseEquals(const uint8_t *data, const char *name, uint32_t len) {
+    for (uint32_t i = 0; i < len; i++) {
+        char c = (char) data[i];
+        if (c >= 'A' && c <= 'Z') {
+            c = (char) (c + 32);
+        }
+        char n = name[i];
+        if (n >= 'A' && n <= 'Z') {
+            n = (char) (n + 32);
+        }
+        if (c != n) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static uint32_t httpParseUint(const uint8_t *data, uint32_t start, uint32_t end) {
+    uint32_t value = 0;
+    bool started = false;
+    for (uint32_t i = start; i < end; i++) {
+        uint8_t c = data[i];
+        if (c == ' ' || c == '\t') {
+            if (!started) {
+                continue;
+            }
+            break;
+        }
+        if (c < '0' || c > '9') {
+            break;
+        }
+        started = true;
+        value = value * 10 + (uint32_t) (c - '0');
+        if (value > 0x7fffffff) {
+            return 0;
+        }
+    }
+    return started ? value : 0;
+}
+
+bool Connection::useHttpTransport() {
+    return hostPort == 80 && secret.empty()
+            && overrideProxyAddress.empty()
+            && ConnectionsManager::getInstance(currentDatacenter->instanceNum).proxySecret.empty();
+}
+
+bool Connection::isHttpTransport() {
+    return currentProtocolType == ProtocolTypeHTTP;
+}
+
+void Connection::resetHttpState() {
+    if (httpRestBuffer != nullptr) {
+        httpRestBuffer->reuse();
+        httpRestBuffer = nullptr;
+    }
+    httpContentLength = 0;
+    httpInFlight = 0;
+}
+
+void Connection::processHttpData(NativeByteBuffer *buffer) {
+    failedConnectionCount = 0;
+
+    if (!hasSomeDataSinceLastConnect) {
+        currentDatacenter->storeCurrentAddressAndPortNum();
+        isTryingNextPort = false;
+        setTimeout(40);
+    }
+    hasSomeDataSinceLastConnect = true;
+
+    NativeByteBuffer *data;
+    if (httpRestBuffer == nullptr) {
+        data = buffer;
+    } else {
+        NativeByteBuffer *newBuffer = BuffersStorage::getInstance().getFreeBuffer(httpRestBuffer->limit() + buffer->limit());
+        httpRestBuffer->rewind();
+        newBuffer->writeBytes(httpRestBuffer);
+        newBuffer->writeBytes(buffer);
+        httpRestBuffer->reuse();
+        httpRestBuffer = nullptr;
+        data = newBuffer;
+    }
+    data->rewind();
+
+    while (data->hasRemaining()) {
+        if (httpContentLength == 0) {
+            uint32_t p = data->position();
+            uint32_t end = data->limit();
+            uint8_t *bytes = data->bytes();
+            bool headerEndFound = false;
+            uint32_t headerEnd = 0;
+            for (uint32_t i = p; i + 3 < end; i++) {
+                if (bytes[i] == '\r' && bytes[i + 1] == '\n' && bytes[i + 2] == '\r' && bytes[i + 3] == '\n') {
+                    headerEnd = i + 4;
+                    headerEndFound = true;
+                    break;
+                }
+            }
+            if (!headerEndFound) {
+                break;
+            }
+            if (end - p < 12 || memcmp(bytes + p, "HTTP/1.1 200", 12) != 0) {
+                if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) received invalid http status", this, currentDatacenter->instanceNum, currentDatacenter->getDatacenterId(), connectionType);
+                if (data != buffer) {
+                    data->reuse();
+                }
+                reconnect();
+                return;
+            }
+            uint32_t contentLength = 0;
+            bool haveLength = false;
+            bool chunked = false;
+            uint32_t lineStart = p;
+            for (uint32_t i = p; i + 1 < headerEnd; i++) {
+                if (bytes[i] == '\r' && bytes[i + 1] == '\n') {
+                    uint32_t lineLen = i - lineStart;
+                    if (lineLen > 15 && httpCaseEquals(bytes + lineStart, "Content-Length:", 15)) {
+                        contentLength = httpParseUint(bytes, lineStart + 15, i);
+                        haveLength = true;
+                    } else if (lineLen > 18 && httpCaseEquals(bytes + lineStart, "Transfer-Encoding:", 18)) {
+                        chunked = true;
+                    }
+                    lineStart = i + 2;
+                    i++;
+                }
+            }
+            if (!haveLength || chunked || contentLength > 2 * 1024 * 1024) {
+                if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) received invalid http headers", this, currentDatacenter->instanceNum, currentDatacenter->getDatacenterId(), connectionType);
+                if (data != buffer) {
+                    data->reuse();
+                }
+                reconnect();
+                return;
+            }
+            httpContentLength = contentLength;
+            data->position(headerEnd);
+        }
+
+        if (data->remaining() < httpContentLength) {
+            break;
+        }
+
+        if (httpContentLength > 0) {
+            uint32_t oldLimit = data->limit();
+            data->limit(data->position() + httpContentLength);
+            uint32_t current_generation = generation;
+            ConnectionsManager::getInstance(currentDatacenter->instanceNum).onConnectionDataReceived(this, data, httpContentLength);
+            if (current_generation != generation) {
+                if (data != buffer) {
+                    data->reuse();
+                }
+                return;
+            }
+            data->position(data->limit());
+            data->limit(oldLimit);
+        }
+        httpContentLength = 0;
+        if (httpInFlight > 0) {
+            httpInFlight--;
+        }
+    }
+
+    if (data->hasRemaining()) {
+        if (data == buffer) {
+            NativeByteBuffer *newBuffer = BuffersStorage::getInstance().getFreeBuffer(data->remaining());
+            newBuffer->writeBytes(data);
+            httpRestBuffer = newBuffer;
+        } else {
+            data->compact();
+            data->limit(data->position());
+            data->position(0);
+            httpRestBuffer = data;
+        }
+    } else {
+        if (data != buffer) {
+            data->reuse();
+        }
+        httpRestBuffer = nullptr;
+    }
+
+    if (httpInFlight == 0 && !hasPendingRequests()
+            && (connectionType == ConnectionTypeGeneric || connectionType == ConnectionTypeTemp
+                || connectionType == ConnectionTypeGenericMedia || connectionType == ConnectionTypePush)) {
+        ConnectionsManager::getInstance(currentDatacenter->instanceNum).sendHttpWait(this);
+    }
+}
+
 void Connection::onDisconnectedInternal(int32_t reason, int32_t error) {
     reconnectTimer->stop();
     if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) disconnected with reason %d", this, currentDatacenter->instanceNum, currentDatacenter->getDatacenterId(), connectionType, reason);
@@ -665,6 +887,7 @@ void Connection::onDisconnectedInternal(int32_t reason, int32_t error) {
     }
     generation++;
     firstPacketSent = false;
+    resetHttpState();
     if (restOfTheData != nullptr) {
         restOfTheData->reuse();
         restOfTheData = nullptr;
