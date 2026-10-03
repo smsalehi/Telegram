@@ -87,6 +87,28 @@ void ConnectionSocket::openConnection(std::string address, uint16_t port, std::s
         proxySecret = &ConnectionsManager::getInstance(instanceNum).proxySecret;
     }
 
+    // Redirect-IP (Xray freedom-style redirect): rewrite the dial target at
+    // the IP layer only. currentAddress/hostAddress above keep the original
+    // datacenter address, so the transport layer (e.g. the HTTP Host header
+    // used on port 80) stays bound to the real destination — exactly like a
+    // VPN-side freedom/direct redirect. Port 0 keeps the resolved port (which
+    // follows Direct port mode); any other port forces all connections to it.
+    // Never applied when a real proxy is in use; proxy-check connections dial
+    // their own target.
+    if (proxyAddress->empty()) {
+        std::string redirectIp = ConnectionsManager::getInstance(instanceNum).getRedirectAddress();
+        uint16_t redirectPort = ConnectionsManager::getInstance(instanceNum).getRedirectPort();
+        if (!redirectIp.empty()) {
+            if (redirectPort != 0) {
+                port = redirectPort;
+            }
+            address = redirectIp;
+            ipv6 = false;
+            isIpv6 = false;
+            if (LOGS_ENABLED) DEBUG_D("connection(%p) redirecting dial to %s:%hu", this, address.c_str(), port);
+        }
+    }
+
     if (!proxyAddress->empty()) {
         if (LOGS_ENABLED) DEBUG_D("connection(%p) connecting via proxy %s:%d secret[%d]", this, proxyAddress->c_str(), proxyPort, (int) proxySecret->size());
         if ((socketFd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
