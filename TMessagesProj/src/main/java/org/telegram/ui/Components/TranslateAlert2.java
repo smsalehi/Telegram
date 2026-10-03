@@ -519,6 +519,38 @@ public class TranslateAlert2 extends BottomSheet implements NotificationCenter.N
         return result;
     }
 
+    /**
+     * Translates several texts with a single request when possible
+     * (Gemini batch mode); results[i] corresponds to texts[i], or the
+     * whole array is null on failure.
+     */
+    public static void alternativeTranslateBatch(java.util.ArrayList<String> texts, String toLng, Utilities.Callback2<String[], Boolean> done) {
+        if (done == null) return;
+        if (texts == null || texts.isEmpty()) {
+            done.run(new String[0], false);
+            return;
+        }
+        if (GeminiTranslator.isEnabled()) {
+            GeminiTranslator.translateBatch(texts, toLng, done);
+            return;
+        }
+        final String[] results = new String[texts.size()];
+        final boolean[] failed = {false};
+        final int[] remaining = {texts.size()};
+        for (int i = 0; i < texts.size(); i++) {
+            final int index = i;
+            alternativeTranslate(texts.get(i), null, toLng, (res, rateLimit) -> {
+                results[index] = res;
+                if (res == null) {
+                    failed[0] = true;
+                }
+                if (--remaining[0] == 0) {
+                    done.run(failed[0] ? null : results, false);
+                }
+            });
+        }
+    }
+
     public static void alternativeTranslate(String text, String fromLng, String toLng, Utilities.Callback2<String, Boolean> done) {
         if (done == null) return;
         if (GeminiTranslator.isEnabled()) {

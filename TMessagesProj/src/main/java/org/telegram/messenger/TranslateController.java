@@ -1185,20 +1185,39 @@ public class TranslateController extends BaseController {
                 }
                 if ("alternative".equals(method) || "system".equals(method)) {
                     final String toLanguage = pendingTranslation1.language;
-                    for (int i = 0; i < pendingTranslation1.messageIds.size(); ++i) {
-                        final int id = pendingTranslation1.messageIds.get(i);
-                        final Utilities.Callback4<Boolean, Integer, TLRPC.TL_textWithEntities, String> _callback = pendingTranslation1.callbacks.get(i);
-                        final String _text = pendingTranslation1.messageTexts.get(i).text;
-                        TranslateAlert2.alternativeTranslate(_text, null, toLanguage, (result, rateLimit) -> {
-                            if (result != null) {
-                                final TLRPC.TL_textWithEntities resultWithEntities = new TLRPC.TL_textWithEntities();
-                                resultWithEntities.text = result;
-                                _callback.run(isTranscription, id, resultWithEntities, toLanguage);
-                            } else {
-                                onTranslationFailed(dialogId, rateLimit);
-                            }
-                        });
+                    final int batchSize = pendingTranslation1.messageIds.size();
+                    final ArrayList<String> batchTexts = new ArrayList<>();
+                    for (int i = 0; i < batchSize; ++i) {
+                        batchTexts.add(pendingTranslation1.messageTexts.get(i).text);
                     }
+                    // one request for the whole batch; results reindex by order
+                    TranslateAlert2.alternativeTranslateBatch(batchTexts, toLanguage, (String[] results, Boolean rateLimit) -> {
+                        if (results != null) {
+                            for (int i = 0; i < batchSize; ++i) {
+                                final int id = pendingTranslation1.messageIds.get(i);
+                                final Utilities.Callback4<Boolean, Integer, TLRPC.TL_textWithEntities, String> _callback = pendingTranslation1.callbacks.get(i);
+                                final TLRPC.TL_textWithEntities resultWithEntities = new TLRPC.TL_textWithEntities();
+                                resultWithEntities.text = results[i];
+                                _callback.run(isTranscription, id, resultWithEntities, toLanguage);
+                            }
+                            return;
+                        }
+                        // batch failed: fall back to one request per message
+                        for (int i = 0; i < batchSize; ++i) {
+                            final int id = pendingTranslation1.messageIds.get(i);
+                            final Utilities.Callback4<Boolean, Integer, TLRPC.TL_textWithEntities, String> _callback = pendingTranslation1.callbacks.get(i);
+                            final String _text = pendingTranslation1.messageTexts.get(i).text;
+                            TranslateAlert2.alternativeTranslate(_text, null, toLanguage, (result, rateLimit) -> {
+                                if (result != null) {
+                                    final TLRPC.TL_textWithEntities resultWithEntities = new TLRPC.TL_textWithEntities();
+                                    resultWithEntities.text = result;
+                                    _callback.run(isTranscription, id, resultWithEntities, toLanguage);
+                                } else {
+                                    onTranslationFailed(dialogId, rateLimit);
+                                }
+                            });
+                        }
+                    });
                     return;
                 }/* else if ("system".equals(method)) {
                     final String toLanguage = pendingTranslation1.language;

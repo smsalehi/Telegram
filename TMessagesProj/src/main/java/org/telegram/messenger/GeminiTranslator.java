@@ -448,6 +448,7 @@ public class GeminiTranslator {
 
     private static class AttemptResult {
         String text;
+        String[] batchText;
         boolean rateLimited;
         boolean retryable;
         String apiKey;
@@ -584,31 +585,26 @@ public class GeminiTranslator {
         return sb.toString();
     }
 
-    private static AttemptResult attemptOnce(String bodyStr, String model, String apiKey) {
+    private static class RawResult {
+        int code;
+        String body;
+        Exception error;
+    }
+
+    /** One HTTP exchange against the Gemini API (redirect route or normal). */
+    private static RawResult execute(String bodyStr, String model, String apiKey) {
+        RawResult out = new RawResult();
         // Redirect IP set: dial it directly (Xray freedom-style redirect).
         if (activeRedirectIp() != null) {
             try {
                 HttpResult res = httpsExchange("POST", "/v1beta/models/" + model + ":generateContent", bodyStr, apiKey);
-                if (res.code == 429) {
-                    AttemptResult r = fail(true, true);
-                    r.apiKey = apiKey;
-                    r.dailyQuota = res.body != null && res.body.contains("PerDay");
-                    return r;
-                }
-                if (res.code != 200) {
-                    return fail(res.code >= 500 || res.code <= 0, false);
-                }
-                String result = parseResult(res.body);
-                if (TextUtils.isEmpty(result)) {
-                    return fail(true, false);
-                }
-                AttemptResult r = new AttemptResult();
-                r.text = result;
-                return r;
+                out.code = res.code;
+                out.body = res.body;
             } catch (Exception e) {
+                out.error = e;
                 FileLog.e(e, false);
-                return fail(true, false);
             }
+            return out;
         }
         HttpURLConnection connection = null;
         try {
@@ -623,44 +619,218 @@ public class GeminiTranslator {
 
             byte[] payload = bodyStr.getBytes(StandardCharsets.UTF_8);
             connection.setFixedLengthStreamingMode(payload.length);
-            try (OutputStream out = connection.getOutputStream()) {
-                out.write(payload);
-                out.flush();
+            try (OutputStream out2 = connection.getOutputStream()) {
+                out2.write(payload);
+                out2.flush();
             }
 
-            int code = connection.getResponseCode();
-            if (code == 429) {
-                AttemptResult r = fail(true, true);
-                r.apiKey = apiKey;
-                r.dailyQuota = readStream(connection.getErrorStream()).contains("PerDay");
-                return r;
-            }
-            if (code != HttpURLConnection.HTTP_OK) {
-                return fail(code >= 500, false);
-            }
-
-            StringBuilder buffer = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    buffer.append(line).append('\n');
-                }
-            }
-            String result = parseResult(buffer.toString());
-            if (TextUtils.isEmpty(result)) {
-                return fail(true, false);
-            }
-            AttemptResult r = new AttemptResult();
-            r.text = result;
-            return r;
+            out.code = connection.getResponseCode();
+            java.io.InputStream stream = out.code >= 200 && out.code < 300
+                    ? connection.getInputStream()
+                    : connection.getErrorStream();
+            out.body = readStream(stream);
         } catch (Exception e) {
+            out.error = e;
             FileLog.e(e, false);
-            return fail(true, false);
         } finally {
             if (connection != null) {
                 connection.disconnect();
             }
         }
+        return out;
+    }
+
+    private static AttemptResult finishAttempt(AttemptResult r, RawResult res, String apiKey) {
+        r.apiKey = apiKey;
+        if (res.error != null) {
+            return fail(true, false);
+        }
+        if (res.code == 429) {
+            AttemptResult limited = fail(true, true);
+            limited.apiKey = apiKey;
+            limited.dailyQuota = res.body != null && res.body.contains("PerDay");
+            return limited;
+        }
+        if (res.code != HttpURLConnection.HTTP_OK) {
+            return fail(res.code >= 500 || res.code <= 0, false);
+        }
+        return r;
+    }
+
+    private static AttemptResult attemptOnce(String bodyStr, String model, String apiKey) {
+        RawResult res = execute(bodyStr, model, apiKey);
+        AttemptResult r = finishAttempt(new AttemptResult(), res, apiKey);
+        if (r.text == null && !r.rateLimited && res.error == null && res.code == HttpURLConnection.HTTP_OK) {
+            // 200 but no usable text: retryable (e.g. empty candidates)
+            return fail(true, false);
+        }
+        return r;
+    }
+
+    private static AttemptResult attemptBatchOnce(String bodyStr, String model, String apiKey, int expected) {
+        RawResult res = execute(bodyStr, model, apiKey);
+        AttemptResult r = new AttemptResult();
+        if (res.error == null && res.code == HttpURLConnection.HTTP_OK) {
+            r.batchText = parseBatchResult(res.body, expected);
+            if (r.batchText != null) {
+                r.apiKey = apiKey;
+                return r;
+            }
+            // 200 but unusable payload: retryable
+            r = fail(true, false);
+            r.apiKey = apiKey;
+            return r;
+        }
+        return finishAttempt(r, res, apiKey);
+    }
+
+    /** Parses a JSON-array response of exactly `expected` translated strings. */
+    private static String[] parseBatchResult(String body, int expected) {
+        if (TextUtils.isEmpty(body)) {
+            return null;
+        }
+        String trimmed = body.trim();
+        int start = trimmed.indexOf('[');
+        int end = trimmed.lastIndexOf(']');
+        if (start < 0 || end <= start) {
+            return null;
+        }
+        try {
+            JSONArray arr = new JSONArray(trimmed.substring(start, end + 1));
+            if (arr.length() != expected) {
+                return null;
+            }
+            String[] out = new String[expected];
+            for (int i = 0; i < expected; i++) {
+                out[i] = arr.optString(i, null);
+                if (out[i] == null) {
+                    return null;
+                }
+            }
+            return out;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String buildBodyJsonBatch(String prompt) throws org.json.JSONException {
+        JSONObject body = buildBodyJson(prompt);
+        JSONObject generationConfig = body.optJSONObject("generationConfig");
+        generationConfig.put("responseMimeType", "application/json");
+        generationConfig.put("maxOutputTokens", 16384);
+        return body.toString();
+    }
+
+    private static String buildBatchPrompt(java.util.ArrayList<String> texts, String to) {
+        JSONArray arr = new JSONArray();
+        for (String text : texts) {
+            arr.put(text == null ? "" : text);
+        }
+        return "Translate each text in the JSON array below from its auto-detected source language to " + to + ".\n"
+                + "Return a JSON array with the translated texts in the same order.\n"
+                + "If a text is already in " + to + ", return it unchanged. Output only the JSON array.\n\n"
+                + arr.toString();
+    }
+
+    /**
+     * Translate several texts with ONE API request. texts[i] maps to
+     * results[i]; failed requests deliver null results. Uses the same key
+     * pool, pacing and quota management as single translation.
+     */
+    public static void translateBatch(java.util.ArrayList<String> texts, String toLng, Utilities.Callback2<String[], Boolean> done) {
+        if (done == null) {
+            return;
+        }
+        final int count = texts == null ? 0 : texts.size();
+        if (count == 0) {
+            AndroidUtilities.runOnUIThread(() -> done.run(new String[0], false));
+            return;
+        }
+        final ArrayList<String> apiKeys = getApiKeys();
+        if (apiKeys.isEmpty()) {
+            AndroidUtilities.runOnUIThread(() -> done.run(null, false));
+            return;
+        }
+        String to = baseCode(toLng);
+        if (TextUtils.isEmpty(to)) {
+            to = "en";
+        }
+        final String toFinal = to;
+        final String[] results = new String[count];
+        final java.util.ArrayList<Integer> pendingIdx = new java.util.ArrayList<>();
+        final java.util.ArrayList<String> pendingTexts = new java.util.ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            String text = texts.get(i);
+            if (TextUtils.isEmpty(text)) {
+                results[i] = "";
+                continue;
+            }
+            String cached;
+            synchronized (cache) {
+                cached = cache.get(cacheKey(text, "", toFinal));
+            }
+            if (cached != null) {
+                results[i] = cached;
+            } else {
+                pendingIdx.add(i);
+                pendingTexts.add(text);
+            }
+        }
+        if (pendingTexts.isEmpty()) {
+            AndroidUtilities.runOnUIThread(() -> done.run(results, false));
+            return;
+        }
+        final String prompt = buildBatchPrompt(pendingTexts, toFinal);
+        final String model = getModel();
+        final int maxAttempts = Math.max(3, apiKeys.size() + 1);
+        new Thread(() -> {
+            AttemptResult last = fail(false, false);
+            for (int attempt = 0; attempt < maxAttempts; attempt++) {
+                final String apiKey = pickApiKey();
+                if (apiKey == null) {
+                    last = fail(true, true);
+                    break;
+                }
+                awaitRequestSlot(apiKeys.size());
+                countRequest(apiKey);
+                try {
+                    last = attemptBatchOnce(buildBodyJsonBatch(prompt), model, apiKey, pendingTexts.size());
+                } catch (Exception ex) {
+                    FileLog.e(ex, false);
+                    last = fail(true, false);
+                }
+                if (last.batchText != null) {
+                    break;
+                }
+                if (last.rateLimited && last.apiKey != null) {
+                    parkKey(last.apiKey, last.dailyQuota);
+                    continue;
+                }
+                if (!last.retryable) {
+                    break;
+                }
+                try {
+                    Thread.sleep(1000L * Math.min(attempt + 1, 3));
+                } catch (InterruptedException ignored) {}
+            }
+            if (last.batchText != null) {
+                for (int i = 0; i < pendingTexts.size(); i++) {
+                    String translated = last.batchText[i];
+                    if (TextUtils.isEmpty(translated)) {
+                        translated = pendingTexts.get(i);
+                    }
+                    synchronized (cache) {
+                        cache.put(cacheKey(pendingTexts.get(i), "", toFinal), translated);
+                    }
+                    results[pendingIdx.get(i)] = translated;
+                }
+                final String[] out = results;
+                AndroidUtilities.runOnUIThread(() -> done.run(out, false));
+            } else {
+                final boolean rateLimited = last.rateLimited;
+                AndroidUtilities.runOnUIThread(() -> done.run(null, rateLimited));
+            }
+        }).start();
     }
 
     /**
