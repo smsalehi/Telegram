@@ -355,9 +355,9 @@ public class ProxyUtil {
         }
 
         if (text != null) {
-            if (text.trim().startsWith("[") || text.trim().startsWith("{") || text.contains("\"outbounds\"") || text.contains("\"vless\"")) {
-                proxies.addAll(parseXrayJson(text));
-            }
+            // protocol-agnostic: parseXrayJson extracts any JSON payload and
+            // parseXrayConfig validates it by content (outbounds must exist)
+            proxies.addAll(parseXrayJson(text));
         }
 
         if (proxies.isEmpty() && !error[0] && !TextUtils.isEmpty(text)) {
