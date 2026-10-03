@@ -998,7 +998,7 @@ void ConnectionSocket::webHandleWrite() {
             frame->writeByte(buffer->bytes()[i] ^ maskKey[i & 3], nullptr);
         }
         frame->rewind();
-        int ret = SSL_write(webSsl, frame->bytes, (int) frame->length);
+        int ret = SSL_write(webSsl, frame->bytes(), (int) frame->capacity());
         if (ret <= 0) {
             int err = SSL_get_error(webSsl, ret);
             if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
@@ -1103,7 +1103,7 @@ void ConnectionSocket::webSendFrame(uint8_t opcode, const uint8_t *payload, size
         frame->writeByte(payload[i] ^ maskKey[i & 3], nullptr);
     }
     frame->rewind();
-    int ret = SSL_write(webSsl, frame->bytes, (int) frame->length);
+    int ret = SSL_write(webSsl, frame->bytes(), (int) frame->capacity());
     if (ret <= 0) {
         if (LOGS_ENABLED) DEBUG_E("connection(%p) web frame send failed", this);
     }
