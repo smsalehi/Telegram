@@ -1207,13 +1207,13 @@ public class TranslateController extends BaseController {
                             final int id = pendingTranslation1.messageIds.get(i);
                             final Utilities.Callback4<Boolean, Integer, TLRPC.TL_textWithEntities, String> _callback = pendingTranslation1.callbacks.get(i);
                             final String _text = pendingTranslation1.messageTexts.get(i).text;
-                            TranslateAlert2.alternativeTranslate(_text, null, toLanguage, (result, rateLimit) -> {
+                            TranslateAlert2.alternativeTranslate(_text, null, toLanguage, (result, msgRateLimit) -> {
                                 if (result != null) {
                                     final TLRPC.TL_textWithEntities resultWithEntities = new TLRPC.TL_textWithEntities();
                                     resultWithEntities.text = result;
                                     _callback.run(isTranscription, id, resultWithEntities, toLanguage);
                                 } else {
-                                    onTranslationFailed(dialogId, rateLimit);
+                                    onTranslationFailed(dialogId, msgRateLimit);
                                 }
                             });
                         }

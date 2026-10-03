@@ -660,9 +660,15 @@ public class GeminiTranslator {
     private static AttemptResult attemptOnce(String bodyStr, String model, String apiKey) {
         RawResult res = execute(bodyStr, model, apiKey);
         AttemptResult r = finishAttempt(new AttemptResult(), res, apiKey);
-        if (r.text == null && !r.rateLimited && res.error == null && res.code == HttpURLConnection.HTTP_OK) {
-            // 200 but no usable text: retryable (e.g. empty candidates)
-            return fail(true, false);
+        if (res.error == null && res.code == HttpURLConnection.HTTP_OK) {
+            String parsed = parseResult(res.body);
+            if (TextUtils.isEmpty(parsed)) {
+                // 200 but no usable text: retryable (e.g. empty candidates)
+                r = fail(true, false);
+                r.apiKey = apiKey;
+                return r;
+            }
+            r.text = parsed;
         }
         return r;
     }
@@ -714,7 +720,7 @@ public class GeminiTranslator {
     }
 
     private static String buildBodyJsonBatch(String prompt) throws org.json.JSONException {
-        JSONObject body = buildBodyJson(prompt);
+        JSONObject body = new JSONObject(buildBodyJson(prompt));
         JSONObject generationConfig = body.optJSONObject("generationConfig");
         generationConfig.put("responseMimeType", "application/json");
         generationConfig.put("maxOutputTokens", 16384);
