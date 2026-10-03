@@ -509,6 +509,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     private ActionBarMenuItem doneItem;
     private ProxyDrawable proxyDrawable;
     private ActionBarMenuSubItem proxyMenuSubItem;
+    private ActionBarMenuSubItem directMenuSubItem;
     private HintView2 storyHint;
     private HintView2 storyPremiumHint;
     private boolean canShowStoryHint;
@@ -3260,10 +3261,14 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             doneItem.setAlpha(0.0f);
             doneItem.setVisibility(View.GONE);
             proxyDrawable = new ProxyDrawable(context);
-            proxyMenuSubItem = new ActionBarMenuSubItem(context, false, true, resourceProvider);
+            proxyMenuSubItem = new ActionBarMenuSubItem(context, false, false, resourceProvider);
             proxyMenuSubItem.setItemHeight(56);
             proxyMenuSubItem.setTextAndIcon(getString(R.string.MenuProxyTitle), 0, proxyDrawable);
             proxyMenuSubItem.setContentDescription(getString(R.string.ProxySettings));
+            directMenuSubItem = new ActionBarMenuSubItem(context, false, true, resourceProvider);
+            directMenuSubItem.setItemHeight(56);
+            directMenuSubItem.setTextAndIcon(getString(R.string.DirectSettings), R.drawable.msg_filled_datausage, null);
+            directMenuSubItem.setContentDescription(getString(R.string.DirectSettings));
 
             passcodeItem = menu.addItem(1, R.drawable.outline_header_lock_24);
             passcodeItem.setContentDescription(getString(R.string.AccDescrPasscodeLock));
@@ -13772,8 +13777,31 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             io.add(proxyMenuSubItem);
         }
 
+        if (directMenuSubItem != null) {
+            directMenuSubItem.subtextView.setTextColor(getThemedColor(Theme.key_groupcreate_sectionText));
+            directMenuSubItem.setSubtext(getDirectStatusText());
+            directMenuSubItem.setOnClickListener(v -> {
+                io.dismiss();
+                presentFragment(new DirectSettingsActivity());
+            });
+            io.add(directMenuSubItem);
+        }
+
         io.show();
         io.setTranslationY(-dp(64));
+    }
+
+    private String getDirectStatusText() {
+        SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
+        boolean modify = preferences.getBoolean("direct_port_modify", false);
+        int mode = preferences.getInt("direct_port_mode", ConnectionsManager.DIRECT_PORT_AUTO);
+        if (!modify || mode == ConnectionsManager.DIRECT_PORT_AUTO) {
+            return getString(R.string.DirectPortAuto);
+        } else if (mode == ConnectionsManager.DIRECT_PORT_HTTPS) {
+            return getString(R.string.DirectPortHttps);
+        } else {
+            return getString(R.string.DirectPortHttp);
+        }
     }
 
     @Override
