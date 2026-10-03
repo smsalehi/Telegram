@@ -951,7 +951,7 @@ void ConnectionSocket::webHandleRead() {
 
 void ConnectionSocket::webHandleWrite() {
     if (webOutFrame != nullptr) {
-        int ret = SSL_write(webSsl, webOutFrame->bytes, (int) webOutFrame->length);
+        int ret = SSL_write(webSsl, webOutFrame->bytes(), (int) webOutFrame->capacity());
         if (ret <= 0) {
             int err = SSL_get_error(webSsl, ret);
             if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
