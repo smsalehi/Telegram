@@ -139,12 +139,15 @@ public class GeminiTranslateActivity extends BaseFragment {
         editText.setTextSize(16);
         editText.setText(GeminiTranslator.getApiKey());
         editText.setHint(LocaleController.getString(R.string.GeminiApiKeyHint));
-        editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        editText.setSingleLine(false);
+        editText.setMinLines(2);
+        editText.setMaxLines(6);
         editText.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
         editText.setHintTextColor(Theme.getColor(Theme.key_groupcreate_hintText));
         editText.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4));
         editText.setSelection(editText.getText() != null ? editText.getText().length() : 0);
-        layout.addView(editText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 36, Gravity.LEFT | Gravity.TOP, 24, 6, 24, 0));
+        layout.addView(editText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 110, Gravity.LEFT | Gravity.TOP, 24, 6, 24, 0));
         builder.setView(layout);
 
         builder.setPositiveButton(LocaleController.getString(R.string.Save), (dialog, which) -> {

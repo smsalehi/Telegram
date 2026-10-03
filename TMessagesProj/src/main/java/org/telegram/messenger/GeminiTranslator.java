@@ -19,6 +19,7 @@ import java.net.Socket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -67,7 +68,7 @@ public class GeminiTranslator {
 
     public static boolean isEnabled() {
         try {
-            return prefs().getBoolean(KEY_ENABLED, false) && !TextUtils.isEmpty(getApiKey());
+            return prefs().getBoolean(KEY_ENABLED, false) && !getApiKeys().isEmpty();
         } catch (Throwable e) {
             return false;
         }
@@ -93,13 +94,32 @@ public class GeminiTranslator {
         } catch (Throwable ignored) {}
     }
 
-    public static String getApiKey() {
+    /**
+     * All configured keys. Several keys (one per line, or comma/semicolon
+     * separated) form a rotation pool that spreads requests across free-tier
+     * quotas. Quotas are counted per Google project, so keys must come from
+     * different projects for rotation to add capacity.
+     */
+    public static ArrayList<String> getApiKeys() {
+        ArrayList<String> keys = new ArrayList<>();
         try {
-            String key = prefs().getString(KEY_API_KEY, "");
-            return key == null ? "" : key.trim();
-        } catch (Throwable e) {
-            return "";
+            String raw = prefs().getString(KEY_API_KEY, "");
+            if (!TextUtils.isEmpty(raw)) {
+                for (String part : raw.split("[\\n,;]+")) {
+                    String key = part.trim();
+                    if (!key.isEmpty() && !keys.contains(key)) {
+                        keys.add(key);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
         }
+        return keys;
+    }
+
+    public static String getApiKey() {
+        ArrayList<String> keys = getApiKeys();
+        return keys.isEmpty() ? "" : keys.get(0);
     }
 
     public static void setApiKey(String key) {
@@ -109,14 +129,16 @@ public class GeminiTranslator {
     }
 
     public static String getMaskedKey() {
-        String key = getApiKey();
-        if (TextUtils.isEmpty(key)) {
+        ArrayList<String> keys = getApiKeys();
+        if (keys.isEmpty()) {
             return "";
         }
-        if (key.length() <= 8) {
-            return "****";
+        String first = keys.get(0);
+        String masked = first.length() <= 8 ? "****" : "****" + first.substring(first.length() - 4);
+        if (keys.size() > 1) {
+            masked += " (+" + (keys.size() - 1) + ")";
         }
-        return "****" + key.substring(key.length() - 4);
+        return masked;
     }
 
     public static String getModel() {
@@ -253,7 +275,7 @@ public class GeminiTranslator {
      * and certificate verification still use the real hostname. Used only when
      * the user configured a Redirect IP; otherwise the normal path applies.
      */
-    private static HttpResult httpsExchange(String method, String path, String jsonBody) throws java.io.IOException {
+    private static HttpResult httpsExchange(String method, String path, String jsonBody, String apiKey) throws java.io.IOException {
         String redirectIp = activeRedirectIp();
         if (redirectIp == null) {
             throw new java.io.IOException("redirect not configured");
@@ -275,7 +297,7 @@ public class GeminiTranslator {
                 req.append(method).append(' ').append(path).append(" HTTP/1.1\r\n");
                 req.append("Host: ").append(GEMINI_HOST).append("\r\n");
                 req.append("Content-Type: application/json\r\n");
-                req.append("x-goog-api-key: ").append(getApiKey()).append("\r\n");
+                req.append("x-goog-api-key: ").append(apiKey).append("\r\n");
                 req.append("Content-Length: ").append(payload.length).append("\r\n");
                 req.append("Connection: close\r\n\r\n");
                 OutputStream out = ssl.getOutputStream();
@@ -428,6 +450,8 @@ public class GeminiTranslator {
         String text;
         boolean rateLimited;
         boolean retryable;
+        String apiKey;
+        boolean dailyQuota;
     }
 
     private static AttemptResult fail(boolean retryable, boolean rateLimited) {
@@ -437,13 +461,139 @@ public class GeminiTranslator {
         return r;
     }
 
+    // Conservative free-tier assumptions (Google publishes ~5 RPM / ~100 RPD
+    // for flash models on the free tier, measured per project, resetting at
+    // midnight Pacific). Pacing and the local daily budget stay below them.
+    private static final int PER_KEY_ASSUMED_RPM = 4;
+    private static final int PER_KEY_ASSUMED_RPD = 90;
+    private static final HashMap<String, Long> keyCooldownUntil = new HashMap<>();
+    private static final HashMap<String, long[]> keyDailyUsage = new HashMap<>();
+    private static final Object poolLock = new Object();
+    private static long nextAllowedRequestTime;
+
+    /** Blocks until the pool is allowed another request (spreads RPM across keys). */
+    private static void awaitRequestSlot(int keyCount) {
+        long interval = Math.max(250L, 60000L / Math.max(1, keyCount * PER_KEY_ASSUMED_RPM));
+        synchronized (poolLock) {
+            for (;;) {
+                long now = android.os.SystemClock.elapsedRealtime();
+                if (nextAllowedRequestTime <= now) {
+                    nextAllowedRequestTime = Math.max(now, nextAllowedRequestTime) + interval;
+                    return;
+                }
+                long wait = nextAllowedRequestTime - now;
+                try {
+                    poolLock.wait(wait);
+                } catch (InterruptedException ignored) {
+                    return;
+                }
+            }
+        }
+    }
+
+    private static boolean dailyBudgetExhausted(String key) {
+        long[] usage = keyDailyUsage.get(key);
+        if (usage == null) {
+            return false;
+        }
+        long day = System.currentTimeMillis() / 86400000L;
+        if (usage[0] != day) {
+            keyDailyUsage.remove(key);
+            return false;
+        }
+        return usage[1] >= PER_KEY_ASSUMED_RPD;
+    }
+
+    private static void countRequest(String key) {
+        long day = System.currentTimeMillis() / 86400000L;
+        long[] usage = keyDailyUsage.get(key);
+        if (usage == null || usage[0] != day) {
+            keyDailyUsage.put(key, new long[]{day, 1});
+        } else {
+            usage[1]++;
+        }
+    }
+
+    private static void parkKey(String key, boolean dailyQuota) {
+        long until;
+        if (dailyQuota) {
+            // daily quotas reset at midnight Pacific
+            java.util.Calendar cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("America/Los_Angeles"));
+            cal.add(java.util.Calendar.DAY_OF_YEAR, 1);
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0);
+            cal.set(java.util.Calendar.MINUTE, 0);
+            cal.set(java.util.Calendar.SECOND, 0);
+            cal.set(java.util.Calendar.MILLISECOND, 0);
+            until = cal.getTimeInMillis();
+        } else {
+            until = android.os.SystemClock.elapsedRealtime() + 65_000L;
+        }
+        keyCooldownUntil.put(key, until);
+    }
+
+    /**
+     * Returns a usable key: never daily-exhausted, skipping per-minute parked
+     * ones (waiting at most 20s per round for the earliest to free up), or
+     * null when every key is out of daily budget.
+     */
+    private static String pickApiKey() {
+        for (;;) {
+            String best = null;
+            long bestUntil = Long.MAX_VALUE;
+            synchronized (poolLock) {
+                long now = android.os.SystemClock.elapsedRealtime();
+                for (String key : getApiKeys()) {
+                    Long until = keyCooldownUntil.get(key);
+                    if (until == null || until <= now) {
+                        if (!dailyBudgetExhausted(key)) {
+                            return key;
+                        }
+                        continue;
+                    }
+                    if (until < bestUntil) {
+                        bestUntil = until;
+                        best = key;
+                    }
+                }
+            }
+            if (best == null || dailyBudgetExhausted(best)) {
+                return null;
+            }
+            long now = android.os.SystemClock.elapsedRealtime();
+            long wait = Math.min(bestUntil - now, 20000L);
+            try {
+                Thread.sleep(wait);
+            } catch (InterruptedException ignored) {
+                return null;
+            }
+        }
+    }
+
+    private static String readStream(java.io.InputStream in) {
+        if (in == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append('\n');
+            }
+        } catch (Exception ignored) {
+        }
+        return sb.toString();
+    }
+
     private static AttemptResult attemptOnce(String bodyStr, String model, String apiKey) {
         // Redirect IP set: dial it directly (Xray freedom-style redirect).
         if (activeRedirectIp() != null) {
             try {
-                HttpResult res = httpsExchange("POST", "/v1beta/models/" + model + ":generateContent", bodyStr);
+                HttpResult res = httpsExchange("POST", "/v1beta/models/" + model + ":generateContent", bodyStr, apiKey);
                 if (res.code == 429) {
-                    return fail(true, true);
+                    AttemptResult r = fail(true, true);
+                    r.apiKey = apiKey;
+                    r.dailyQuota = res.body != null && res.body.contains("PerDay");
+                    return r;
                 }
                 if (res.code != 200) {
                     return fail(res.code >= 500 || res.code <= 0, false);
@@ -480,7 +630,10 @@ public class GeminiTranslator {
 
             int code = connection.getResponseCode();
             if (code == 429) {
-                return fail(true, true);
+                AttemptResult r = fail(true, true);
+                r.apiKey = apiKey;
+                r.dailyQuota = readStream(connection.getErrorStream()).contains("PerDay");
+                return r;
             }
             if (code != HttpURLConnection.HTTP_OK) {
                 return fail(code >= 500, false);
@@ -522,8 +675,8 @@ public class GeminiTranslator {
             AndroidUtilities.runOnUIThread(() -> done.run("", false));
             return;
         }
-        final String apiKey = getApiKey();
-        if (TextUtils.isEmpty(apiKey)) {
+        final ArrayList<String> apiKeys = getApiKeys();
+        if (apiKeys.isEmpty()) {
             AndroidUtilities.runOnUIThread(() -> done.run(null, false));
             return;
         }
@@ -549,24 +702,38 @@ public class GeminiTranslator {
         }
         final String prompt = buildPrompt(text, from, toFinal);
         final String model = getModel();
-        final int maxAttempts = 3;
+        final int maxAttempts = Math.max(3, apiKeys.size() + 1);
         new Thread(() -> {
             AttemptResult last = fail(false, false);
             for (int attempt = 0; attempt < maxAttempts; attempt++) {
-                if (attempt > 0) {
-                    try {
-                        Thread.sleep(1000L * attempt);
-                    } catch (InterruptedException ignored) {}
+                final String apiKey = pickApiKey();
+                if (apiKey == null) {
+                    // every key is out of daily budget — stop for today
+                    last = fail(true, true);
+                    break;
                 }
+                awaitRequestSlot(apiKeys.size());
+                countRequest(apiKey);
                 try {
                     last = attemptOnce(buildBodyJson(prompt), model, apiKey);
                 } catch (Exception ex) {
                     FileLog.e(ex, false);
                     last = fail(true, false);
                 }
-                if (last.text != null || !last.retryable) {
+                if (last.text != null) {
                     break;
                 }
+                if (last.rateLimited && last.apiKey != null) {
+                    // park this key and rotate to the next one
+                    parkKey(last.apiKey, last.dailyQuota);
+                    continue;
+                }
+                if (!last.retryable) {
+                    break;
+                }
+                try {
+                    Thread.sleep(1000L * Math.min(attempt + 1, 3));
+                } catch (InterruptedException ignored) {}
             }
             if (last.text != null) {
                 synchronized (cache) {
@@ -635,7 +802,7 @@ public class GeminiTranslator {
             if (redirect != null) {
                 tlog(res.log, "dial: TCP connect " + redirect + ":443 ...");
                 try {
-                    HttpResult r = httpsExchange("POST", "/v1beta/models/" + model + ":generateContent", body);
+                    HttpResult r = httpsExchange("POST", "/v1beta/models/" + model + ":generateContent", body, apiKey);
                     res.httpCode = r.code;
                     tlog(res.log, "TLS handshake + hostname verify: OK");
                     tlog(res.log, "HTTP status=" + r.code);
