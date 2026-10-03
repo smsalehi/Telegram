@@ -53,7 +53,7 @@ public class GeminiTranslator {
     private static final String GEMINI_HOST = "generativelanguage.googleapis.com";
     private static final int GEMINI_PORT = 443;
 
-    public static final String DEFAULT_MODEL = "gemini-2.0-flash";
+    public static final String DEFAULT_MODEL = "gemini-3.8-flash";
     public static final String DEFAULT_PROMPT =
             "Translate the following text from {from} to {to}. " +
             "Output only the translation, without explanations, quotes or extra formatting. " +
