@@ -1290,10 +1290,10 @@ public class ProxySettingsActivity extends BaseFragment {
         if (getParentActivity() == null) {
             return;
         }
-        String log = XrayProxyManager.getLogText();
-        if (log == null || log.trim().isEmpty()) {
-            log = LocaleController.getString(R.string.XrayProxyLogEmpty);
-        }
+        String current = XrayProxyManager.getLogText();
+        final String log = current == null || current.trim().isEmpty()
+                ? LocaleController.getString(R.string.XrayProxyLogEmpty)
+                : current;
         AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
         builder.setTitle(LocaleController.getString(R.string.XrayProxyViewLog));
         ScrollView scroll = new ScrollView(getParentActivity());
