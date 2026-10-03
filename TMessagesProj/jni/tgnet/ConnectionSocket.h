@@ -84,7 +84,7 @@ private:
     int8_t webState = 0; // 1 = tls handshake, 2 = ws upgrade sent, 3 = established
     SSL *webSsl = nullptr;
     std::vector<uint8_t> webIn;
-    ByteArray *webOutFrame = nullptr;
+    NativeByteBuffer *webOutFrame = nullptr;
     std::string webWsKey;
 
     bool tlsHashMismatch = false;
