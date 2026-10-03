@@ -661,7 +661,7 @@ public class TranslateController extends BaseController {
                 checkLanguage(messageObject, onScreen);
                 return;
             }
-            if (UNKNOWN_LANGUAGE.equals(originalLanguage) || isLanguageRestricted(originalLanguage)) {
+            if (UNKNOWN_LANGUAGE.equals(originalLanguage) || isLanguageRestrictedForAuto(originalLanguage)) {
                 return;
             }
             final String target = getDialogTranslateTo(dialogId);
@@ -992,7 +992,7 @@ public class TranslateController extends BaseController {
             isTranslatable(messageObject) &&
             messageObject.messageOwner.originalLanguage != null &&
             !UNKNOWN_LANGUAGE.equals(messageObject.messageOwner.originalLanguage) &&
-            !isLanguageRestricted(messageObject.messageOwner.originalLanguage)
+            !isLanguageRestrictedForAuto(messageObject.messageOwner.originalLanguage)
         );
 
         if (isUnknown) {
@@ -1865,6 +1865,18 @@ public class TranslateController extends BaseController {
         } catch (Exception ignore) {
             return false;
         }
+    }
+
+    /**
+     * The Gemini auto-translate path always honors the user's don't-translate
+     * list, even for non-premium accounts (upstream only applies the list to
+     * premium users and otherwise only excludes the app's own language).
+     */
+    private boolean isLanguageRestrictedForAuto(String lng) {
+        if (RestrictedLanguagesSelectActivity.getRestrictedLanguages().contains(lng)) {
+            return true;
+        }
+        return isLanguageRestricted(lng);
     }
 
     private void loadTranslatingDialogsCached() {
