@@ -44,9 +44,10 @@ public class DirectSettingsActivity extends BaseFragment {
     private static final int ROW_AUTO = 3;
     private static final int ROW_HTTPS = 4;
     private static final int ROW_HTTP = 5;
-    private static final int ROW_SHADOW = 6;
-    private static final int ROW_INFO = 7;
-    private static final int ROW_COUNT = 8;
+    private static final int ROW_WEB = 6;
+    private static final int ROW_SHADOW = 7;
+    private static final int ROW_INFO = 8;
+    private static final int ROW_COUNT = 9;
 
     private RecyclerListView listView;
     private ListAdapter listAdapter;
@@ -61,7 +62,7 @@ public class DirectSettingsActivity extends BaseFragment {
 
     private int getMode() {
         int mode = prefs().getInt("direct_port_mode", ConnectionsManager.DIRECT_PORT_AUTO);
-        if (mode < ConnectionsManager.DIRECT_PORT_AUTO || mode > ConnectionsManager.DIRECT_PORT_HTTP) {
+        if (mode < ConnectionsManager.DIRECT_PORT_AUTO || mode > ConnectionsManager.DIRECT_PORT_WEB) {
             return ConnectionsManager.DIRECT_PORT_AUTO;
         }
         return mode;
@@ -116,6 +117,10 @@ public class DirectSettingsActivity extends BaseFragment {
                 prefs().edit().putInt("direct_port_mode", mode).apply();
                 ConnectionsManager.applyDirectPortMode();
                 listAdapter.notifyDataSetChanged();
+            } else if (position == ROW_WEB && view instanceof TextRadioCell) {
+                prefs().edit().putInt("direct_port_mode", ConnectionsManager.DIRECT_PORT_WEB).apply();
+                ConnectionsManager.applyDirectPortMode();
+                listAdapter.notifyDataSetChanged();
             }
         });
 
@@ -138,7 +143,7 @@ public class DirectSettingsActivity extends BaseFragment {
         public int getItemViewType(int position) {
             if (position == ROW_HEADER || position == ROW_PORT_HEADER) return VIEW_TYPE_HEADER;
             if (position == ROW_MODIFY) return VIEW_TYPE_SWITCH;
-            if (position == ROW_AUTO || position == ROW_HTTPS || position == ROW_HTTP) return VIEW_TYPE_RADIO;
+            if (position == ROW_AUTO || position == ROW_HTTPS || position == ROW_HTTP || position == ROW_WEB) return VIEW_TYPE_RADIO;
             if (position == ROW_SHADOW) return VIEW_TYPE_SHADOW;
             return VIEW_TYPE_INFO;
         }
@@ -193,11 +198,13 @@ public class DirectSettingsActivity extends BaseFragment {
                         cell.setTextAndValueAndCheck(LocaleController.getString(R.string.DirectPortAuto), "", mode == ConnectionsManager.DIRECT_PORT_AUTO, false, true);
                     } else if (position == ROW_HTTPS) {
                         cell.setTextAndValueAndCheck(LocaleController.getString(R.string.DirectPortHttps), "443", mode == ConnectionsManager.DIRECT_PORT_HTTPS, false, true);
-                    } else {
+                    } else if (position == ROW_HTTP) {
                         cell.setTextAndValueAndCheck(LocaleController.getString(R.string.DirectPortHttp), "80", mode == ConnectionsManager.DIRECT_PORT_HTTP, false, false);
+                    } else {
+                        cell.setTextAndValueAndCheck(LocaleController.getString(R.string.DirectPortWeb), "443", mode == ConnectionsManager.DIRECT_PORT_WEB, false, false);
                     }
-                    cell.setEnabled(enabled);
-                    cell.setAlpha(enabled ? 1f : 0.5f);
+                    cell.setEnabled(enabled || position == ROW_WEB);
+                    cell.setAlpha((enabled || position == ROW_WEB) ? 1f : 0.5f);
                     break;
                 }
                 case VIEW_TYPE_INFO: {

@@ -17,6 +17,7 @@
 #include <netdb.h>
 #include <openssl/rand.h>
 #include <openssl/hmac.h>
+#include <openssl/ssl.h>
 #include <algorithm>
 #include <utility>
 #include <openssl/bn.h>
@@ -294,6 +295,16 @@ void ConnectionSocket::closeSocket(int32_t reason, int32_t error) {
     proxyAuthState = 0;
     tlsState = 0;
     onConnectedSent = false;
+    if (webSsl != nullptr) {
+        SSL_free(webSsl);
+        webSsl = nullptr;
+    }
+    webState = 0;
+    webIn.clear();
+    if (webOutFrame != nullptr) {
+        webOutFrame->reuse();
+        webOutFrame = nullptr;
+    }
     outgoingByteStream->clean();
     if (tlsBuffer != nullptr) {
         tlsBuffer->reuse();
@@ -307,6 +318,13 @@ void ConnectionSocket::onEvent(uint32_t events) {
         int32_t error;
         if (checkSocketError(&error) != 0) {
             closeSocket(1, error);
+            return;
+        } else if (webTransport) {
+            if (webState == 1) {
+                webTlsStep();
+                return;
+            }
+            webHandleRead();
             return;
         } else {
             ssize_t readCount;
@@ -528,6 +546,13 @@ void ConnectionSocket::onEvent(uint32_t events) {
         if (checkSocketError(&error) != 0) {
             closeSocket(1, error);
             return;
+        } else if (webTransport) {
+            if (webState == 1) {
+                webTlsStep();
+            } else if (webState == 3) {
+                webHandleWrite();
+            }
+            return;
         } else {
             if (proxyAuthState != 0) {
                 if (proxyAuthState >= 10) {
@@ -707,7 +732,13 @@ void ConnectionSocket::adjustWriteOp() {
         return;
     }
     eventMask.events = EPOLLIN | EPOLLRDHUP | EPOLLERR | EPOLLET;
-    if (proxyAuthState == 0 && (outgoingByteStream->hasData() || !onConnectedSent) || proxyAuthState == 1 || proxyAuthState == 3 || proxyAuthState == 5 || proxyAuthState == 10) {
+    bool wantOut = false;
+    if (webTransport) {
+        wantOut = webState == 1 || webState == 2 || (webState == 3 && (outgoingByteStream->hasData() || !onConnectedSent));
+    } else if (proxyAuthState == 0) {
+        wantOut = outgoingByteStream->hasData() || !onConnectedSent;
+    }
+    if (wantOut || proxyAuthState == 1 || proxyAuthState == 3 || proxyAuthState == 5 || proxyAuthState == 10) {
         eventMask.events |= EPOLLOUT;
     }
     eventMask.data.ptr = eventObject;
@@ -777,4 +808,304 @@ void ConnectionSocket::onHostNameResolved(std::string host, std::string ip, bool
             openConnectionInternal(ipv6);
         }
     });
+}
+
+// ============================ WEB transport ============================
+// MTProto over WebSocket over TLS, mimicking web.telegram.org: the
+// socket dials (possibly through Redirect IP) kws<dcId>.web.telegram.org
+// :443, performs a real TLS handshake with the gateway hostname as SNI,
+// upgrades to a WebSocket with the "binary" subprotocol, and then pipes
+// the usual obfuscated MTProto byte stream through binary WebSocket
+// frames. The gateway bridges frames transparently into the DC network,
+// so the WS layer is treated as a plain byte pipe here.
+
+SSL_CTX *ConnectionSocket::getWebSslCtx() {
+    static SSL_CTX *ctx = nullptr;
+    if (ctx == nullptr) {
+        ctx = SSL_CTX_new(TLS_client_method());
+        if (ctx != nullptr) {
+            // certificates are not verified: the TLS layer is transport
+            // camouflage only, MTProto authenticates the endpoint itself.
+            SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, nullptr);
+            SSL_CTX_set_mode(ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_AUTO_RETRY);
+        }
+    }
+    return ctx;
+}
+
+void ConnectionSocket::setWebTransport(bool enabled) {
+    webTransport = enabled;
+    if (!enabled) {
+        webState = 0;
+    }
+}
+
+void ConnectionSocket::webTlsStep() {
+    if (webSsl == nullptr) {
+        SSL_CTX *ctx = getWebSslCtx();
+        if (ctx == nullptr) {
+            closeSocket(1, -1);
+            return;
+        }
+        webSsl = SSL_new(ctx);
+        if (webSsl == nullptr || SSL_set_fd(webSsl, socketFd) != 1) {
+            if (LOGS_ENABLED) DEBUG_E("connection(%p) web SSL init failed", this);
+            closeSocket(1, -1);
+            return;
+        }
+        SSL_set_tlsext_host_name(webSsl, currentAddress.c_str());
+        if (LOGS_ENABLED) DEBUG_D("connection(%p) web TLS handshake to %s", this, currentAddress.c_str());
+    }
+    int ret = SSL_connect(webSsl);
+    if (ret == 1) {
+        if (LOGS_ENABLED) DEBUG_D("connection(%p) web TLS established", this);
+        webState = 2;
+        webSendUpgradeRequest();
+        adjustWriteOp();
+        return;
+    }
+    int err = SSL_get_error(webSsl, ret);
+    if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
+        if (LOGS_ENABLED) DEBUG_E("connection(%p) web TLS handshake failed err=%d", this, err);
+        closeSocket(1, -1);
+    }
+    adjustWriteOp();
+}
+
+void ConnectionSocket::webSendUpgradeRequest() {
+    uint8_t keyBytes[16];
+    RAND_bytes(keyBytes, 16);
+    static const char *b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    webWsKey = "";
+    for (int i = 0; i < 16; i += 3) {
+        int b0 = keyBytes[i], b1 = i + 1 < 16 ? keyBytes[i + 1] : 0, b2 = i + 2 < 16 ? keyBytes[i + 2] : 0;
+        webWsKey += b64[b0 >> 2];
+        webWsKey += b64[((b0 & 3) << 4) | (b1 >> 4)];
+        webWsKey += i + 1 < 16 ? b64[((b1 & 15) << 2) | (b2 >> 6)] : '=';
+        webWsKey += i + 2 < 16 ? b64[b2 & 63] : '=';
+    }
+
+    std::string request = "GET /apiws HTTP/1.1\r\n"
+            "Host: " + currentAddress + "\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Key: " + webWsKey + "\r\n"
+            "Sec-WebSocket-Protocol: binary\r\n"
+            "Sec-WebSocket-Version: 13\r\n\r\n";
+    int ret = SSL_write(webSsl, request.data(), (int) request.size());
+    if (ret <= 0) {
+        if (LOGS_ENABLED) DEBUG_E("connection(%p) web ws upgrade send failed", this);
+        closeSocket(1, -1);
+    }
+}
+
+void ConnectionSocket::webHandleRead() {
+    NativeByteBuffer *buffer = ConnectionsManager::getInstance(instanceNum).networkBuffer;
+    while (true) {
+        buffer->rewind();
+        int readCount = SSL_read(webSsl, buffer->bytes(), READ_BUFFER_SIZE);
+        if (readCount > 0) {
+            lastEventTime = ConnectionsManager::getInstance(instanceNum).getCurrentTimeMonotonicMillis();
+            webIn.insert(webIn.end(), buffer->bytes(), buffer->bytes() + readCount);
+        } else {
+            int err = SSL_get_error(webSsl, readCount);
+            if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
+                if (LOGS_ENABLED) DEBUG_E("connection(%p) web ssl read failed err=%d", this, err);
+                closeSocket(1, -1);
+                return;
+            }
+            break;
+        }
+    }
+    if (webState == 2) {
+        static std::string separator = "\r\n\r\n";
+        int idx = -1;
+        for (size_t i = 0; i + separator.size() <= webIn.size(); i++) {
+            if (memcmp(webIn.data() + i, separator.data(), separator.size()) == 0) {
+                idx = (int) i;
+                break;
+            }
+        }
+        if (idx < 0) {
+            return;
+        }
+        if (webIn.size() < 12 || memcmp(webIn.data(), "HTTP/1.1 101", 12) != 0) {
+            if (LOGS_ENABLED) DEBUG_E("connection(%p) web ws upgrade rejected", this);
+            closeSocket(1, -1);
+            return;
+        }
+        webIn.erase(webIn.begin(), webIn.begin() + idx + separator.size());
+        webState = 3;
+        lastEventTime = ConnectionsManager::getInstance(instanceNum).getCurrentTimeMonotonicMillis();
+        if (LOGS_ENABLED) DEBUG_D("connection(%p) web ws established", this);
+        if (!onConnectedSent) {
+            onConnected();
+            onConnectedSent = true;
+        }
+        adjustWriteOp();
+    }
+    if (webState == 3) {
+        webParseIncoming();
+    }
+}
+
+void ConnectionSocket::webHandleWrite() {
+    if (webOutFrame != nullptr) {
+        int ret = SSL_write(webSsl, webOutFrame->bytes, (int) webOutFrame->length);
+        if (ret <= 0) {
+            int err = SSL_get_error(webSsl, ret);
+            if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
+                if (LOGS_ENABLED) DEBUG_E("connection(%p) web frame send failed err=%d", this, err);
+                closeSocket(1, -1);
+            }
+            return;
+        }
+        webOutFrame->reuse();
+        webOutFrame = nullptr;
+    }
+    while (outgoingByteStream->hasData()) {
+        if (webOutFrame != nullptr) {
+            return;
+        }
+        NativeByteBuffer *buffer = ConnectionsManager::getInstance(instanceNum).networkBuffer;
+        buffer->clear();
+        outgoingByteStream->get(buffer);
+        buffer->flip();
+        uint32_t remaining = buffer->remaining();
+        if (remaining == 0) {
+            break;
+        }
+        uint8_t maskKey[4];
+        RAND_bytes(maskKey, 4);
+        uint32_t headerSize = remaining < 126 ? 2 : (remaining <= 0xFFFF ? 4 : 10);
+        uint32_t frameLen = headerSize + 4 + remaining;
+        NativeByteBuffer *frame = BuffersStorage::getInstance().getFreeBuffer(frameLen);
+        frame->writeByte(0x82, nullptr); // FIN + binary
+        if (remaining < 126) {
+            frame->writeByte((uint8_t) (0x80 | remaining), nullptr);
+        } else if (remaining <= 0xFFFF) {
+            frame->writeByte((uint8_t) (0x80 | 126), nullptr);
+            frame->writeByte((uint8_t) ((remaining >> 8) & 0xff), nullptr);
+            frame->writeByte((uint8_t) (remaining & 0xff), nullptr);
+        } else {
+            frame->writeByte((uint8_t) (0x80 | 127), nullptr);
+            for (int i = 7; i >= 0; i--) {
+                frame->writeByte((uint8_t) ((remaining >> (8 * i)) & 0xff), nullptr);
+            }
+        }
+        frame->writeBytes(maskKey, 4, nullptr);
+        for (uint32_t i = 0; i < remaining; i++) {
+            frame->writeByte(buffer->bytes()[i] ^ maskKey[i & 3], nullptr);
+        }
+        frame->rewind();
+        int ret = SSL_write(webSsl, frame->bytes, (int) frame->length);
+        if (ret <= 0) {
+            int err = SSL_get_error(webSsl, ret);
+            if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
+                if (LOGS_ENABLED) DEBUG_E("connection(%p) web frame send failed err=%d", this, err);
+                closeSocket(1, -1);
+                return;
+            }
+            // keep the frame for a retry with identical arguments
+            webOutFrame = frame;
+            return;
+        }
+        frame->reuse();
+        outgoingByteStream->discard(remaining);
+        if (ConnectionsManager::getInstance(instanceNum).delegate != nullptr) {
+            ConnectionsManager::getInstance(instanceNum).delegate->onBytesSent((int32_t) remaining, currentNetworkType, instanceNum);
+        }
+        adjustWriteOp();
+    }
+}
+
+void ConnectionSocket::webParseIncoming() {
+    size_t pos = 0;
+    while (true) {
+        size_t available = webIn.size() - pos;
+        if (available < 2) {
+            break;
+        }
+        uint8_t b0 = webIn[pos];
+        uint8_t b1 = webIn[pos + 1];
+        uint8_t opcode = b0 & 0x0F;
+        bool masked = (b1 & 0x80) != 0;
+        uint64_t len = b1 & 0x7F;
+        size_t headerSize = 2;
+        if (len == 126) {
+            if (available < 4) break;
+            len = ((uint64_t) webIn[pos + 2] << 8) | webIn[pos + 3];
+            headerSize = 4;
+        } else if (len == 127) {
+            if (available < 10) break;
+            len = 0;
+            for (int i = 0; i < 8; i++) {
+                len = (len << 8) | webIn[pos + 2 + i];
+            }
+            headerSize = 10;
+        }
+        if (masked) {
+            headerSize += 4;
+        }
+        if (available < headerSize + len) {
+            break;
+        }
+        if (opcode == 0x8) {
+            if (LOGS_ENABLED) DEBUG_D("connection(%p) web ws close frame", this);
+            closeSocket(0, 0);
+            return;
+        } else if (opcode == 0x9) {
+            webSendFrame(0xA, masked ? nullptr : webIn.data() + pos + headerSize, (size_t) len);
+        } else if (opcode == 0x2 || opcode == 0x0) {
+            const uint8_t *payload = webIn.data() + pos + headerSize;
+            if (masked) {
+                payload += 4;
+            }
+            if (len > 0) {
+                NativeByteBuffer *buf = BuffersStorage::getInstance().getFreeBuffer((uint32_t) len);
+                buf->writeBytes((uint8_t *) payload, (uint32_t) len, nullptr);
+                buf->rewind();
+                onReceivedData(buf);
+                buf->reuse();
+            }
+        }
+        pos += headerSize + (size_t) len;
+    }
+    if (pos > 0) {
+        webIn.erase(webIn.begin(), webIn.begin() + pos);
+    }
+}
+
+void ConnectionSocket::webSendFrame(uint8_t opcode, const uint8_t *payload, size_t len) {
+    if (webSsl == nullptr || webState != 3) {
+        return;
+    }
+    uint8_t maskKey[4];
+    RAND_bytes(maskKey, 4);
+    uint32_t headerSize = len < 126 ? 2 : (len <= 0xFFFF ? 4 : 10);
+    uint32_t frameLen = headerSize + 4 + (uint32_t) len;
+    NativeByteBuffer *frame = BuffersStorage::getInstance().getFreeBuffer(frameLen);
+    frame->writeByte((uint8_t) (0x80 | opcode), nullptr);
+    if (len < 126) {
+        frame->writeByte((uint8_t) (0x80 | len), nullptr);
+    } else if (len <= 0xFFFF) {
+        frame->writeByte((uint8_t) (0x80 | 126), nullptr);
+        frame->writeByte((uint8_t) ((len >> 8) & 0xff), nullptr);
+        frame->writeByte((uint8_t) (len & 0xff), nullptr);
+    } else {
+        frame->writeByte((uint8_t) (0x80 | 127), nullptr);
+        for (int i = 7; i >= 0; i--) {
+            frame->writeByte((uint8_t) (((uint64_t) len >> (8 * i)) & 0xff), nullptr);
+        }
+    }
+    frame->writeBytes(maskKey, 4, nullptr);
+    for (size_t i = 0; i < len; i++) {
+        frame->writeByte(payload[i] ^ maskKey[i & 3], nullptr);
+    }
+    frame->rewind();
+    int ret = SSL_write(webSsl, frame->bytes, (int) frame->length);
+    if (ret <= 0) {
+        if (LOGS_ENABLED) DEBUG_E("connection(%p) web frame send failed", this);
+    }
+    frame->reuse();
 }

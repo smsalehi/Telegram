@@ -362,6 +362,21 @@ void Connection::connect() {
     // original datacenter address here so the transport layer (e.g. the HTTP
     // Host header on port 80) stays bound to the real destination.
 
+    // WEB transport (Direct settings): connect to Telegram's own web gateway
+    // (MTProto over WebSocket over TLS) instead of the datacenter addresses.
+    // The gateway hostname is per datacenter; the dial-layer Redirect IP still
+    // applies, with SNI/Host kept on the gateway hostname.
+    bool useWebTransport =
+            ConnectionsManager::getInstance(currentDatacenter->instanceNum).getDirectPortMode() == 3 &&
+            connectionType != ConnectionTypeProxy &&
+            currentDatacenter->getDatacenterId() >= 1 && currentDatacenter->getDatacenterId() <= 5;
+    if (useWebTransport) {
+        hostAddress = "kws" + std::to_string(currentDatacenter->getDatacenterId()) + ".web.telegram.org";
+        hostPort = 443;
+        secret = "";
+    }
+    setWebTransport(useWebTransport);
+
     reconnectTimer->stop();
 
     if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) connecting (%s:%hu)", this, currentDatacenter->instanceNum, currentDatacenter->getDatacenterId(), connectionType, hostAddress.c_str(), hostPort);

@@ -1321,14 +1321,19 @@ public class ConnectionsManager extends BaseController {
     public final static int DIRECT_PORT_AUTO = 0;
     public final static int DIRECT_PORT_HTTPS = 1;
     public final static int DIRECT_PORT_HTTP = 2;
+    public final static int DIRECT_PORT_WEB = 3;
 
     public static int getDirectPortModeSetting() {
         try {
             SharedPreferences prefs = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
+            int mode = prefs.getInt("direct_port_mode", DIRECT_PORT_AUTO);
+            if (mode == DIRECT_PORT_WEB) {
+                // the WEB transport is a direct choice, independent of the port switch
+                return mode;
+            }
             if (!prefs.getBoolean("direct_port_modify", false)) {
                 return DIRECT_PORT_AUTO;
             }
-            int mode = prefs.getInt("direct_port_mode", DIRECT_PORT_AUTO);
             if (mode < DIRECT_PORT_AUTO || mode > DIRECT_PORT_HTTP) {
                 return DIRECT_PORT_AUTO;
             }

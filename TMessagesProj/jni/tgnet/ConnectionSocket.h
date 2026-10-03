@@ -12,6 +12,8 @@
 #include <sys/epoll.h>
 #include <netinet/in.h>
 #include <string>
+#include <vector>
+#include <openssl/ssl.h>
 
 class NativeByteBuffer;
 class ConnectionsManager;
@@ -34,6 +36,7 @@ public:
     void dropConnection();
     void setOverrideProxy(std::string address, uint16_t port, std::string username, std::string password, std::string secret);
     void onHostNameResolved(std::string host, std::string ip, bool ipv6);
+    void setWebTransport(bool enabled);
 
 protected:
     int32_t instanceNum;
@@ -73,6 +76,17 @@ private:
     std::string currentSecret;
     std::string currentSecretDomain;
 
+    // WEB transport: MTProto over WebSocket over TLS to Telegram's web
+    // gateway (kws<dcId>.web.telegram.org), the transport web.telegram.org
+    // itself uses. TLS is camouflage/transport only - MTProto authenticates
+    // the session end to end, so certificates are not verified here.
+    bool webTransport = false;
+    int8_t webState = 0; // 1 = tls handshake, 2 = ws upgrade sent, 3 = established
+    SSL *webSsl = nullptr;
+    std::vector<uint8_t> webIn;
+    ByteArray *webOutFrame = nullptr;
+    std::string webWsKey;
+
     bool tlsHashMismatch = false;
     bool tlsBufferSized = true;
     NativeByteBuffer *tlsBuffer = nullptr;
@@ -86,6 +100,14 @@ private:
     void closeSocket(int32_t reason, int32_t error);
     void openConnectionInternal(bool ipv6);
     void adjustWriteOp();
+
+    void webTlsStep();
+    void webSendUpgradeRequest();
+    void webHandleRead();
+    void webHandleWrite();
+    void webParseIncoming();
+    void webSendFrame(uint8_t opcode, const uint8_t *payload, size_t len);
+    static SSL_CTX *getWebSslCtx();
 
     friend class EventObject;
     friend class ConnectionsManager;

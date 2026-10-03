@@ -131,7 +131,7 @@ target_include_directories(tgnet PUBLIC
         third_party/boringssl/include
         openssl/include)
 target_link_libraries(tgnet
-        crypto)
+        crypto ssl)
 
 # tlottie (prebuilt Rust static library)
 add_library(tlottie STATIC IMPORTED)
