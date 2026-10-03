@@ -336,6 +336,14 @@ android {
         minSdkVersion 21
         targetSdkVersion 36
 
+        // Native build costs ~10 min per ABI; when the build pins one target
+        // (e.g. -PnativeTarget=arm64-v8a) skip the other ABIs entirely.
+        if (nativeTarget != 'SKIP' && !nativeTarget.isBlank()) {
+            ndk {
+                abiFilters nativeTarget
+            }
+        }
+
         vectorDrawables.generatedDensities = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi']
 
         multiDexEnabled true
