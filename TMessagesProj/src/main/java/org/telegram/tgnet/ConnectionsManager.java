@@ -793,14 +793,41 @@ public class ConnectionsManager extends BaseController {
         if (isActive) {
             return native_checkProxy(currentAccount, XrayProxyManager.LOCAL_ADDRESS, XrayProxyManager.getLocalSocksPort(), "", "", "", requestTimeDelegate);
         }
-        final String address = settings.getAddress();
-        final int port = settings.getPort();
+        // not running: best-effort TCP ping to the first server in the stored config
+        String address = null;
+        int port = 0;
+        for (SharedConfig.ProxyInfo info : SharedConfig.getProxyList()) {
+            if (info.settings == settings) {
+                try {
+                    JSONObject root = new JSONObject(info.xrayConfig == null ? "" : info.xrayConfig);
+                    JSONArray outbounds = root.optJSONArray("outbounds");
+                    for (int i = 0; outbounds != null && i < outbounds.length() && address == null; i++) {
+                        JSONObject outbound = outbounds.optJSONObject(i);
+                        JSONObject outboundSettings = outbound != null ? outbound.optJSONObject("settings") : null;
+                        JSONArray vnext = outboundSettings != null ? outboundSettings.optJSONArray("vnext") : null;
+                        JSONObject server = vnext != null && vnext.length() > 0 ? vnext.optJSONObject(0) : null;
+                        if (server != null && !TextUtils.isEmpty(server.optString("address", ""))) {
+                            address = server.optString("address");
+                            port = server.optInt("port", 0);
+                        }
+                    }
+                } catch (Exception ignored) {
+                }
+                break;
+            }
+        }
+        if (address == null || port <= 0) {
+            AndroidUtilities.runOnUIThread(() -> requestTimeDelegate.run(-1L));
+            return 0;
+        }
+        final String pingAddress = address;
+        final int pingPort = port;
         final long start = SystemClock.elapsedRealtime();
         Utilities.globalQueue.postRunnable(() -> {
             long time = -1;
             Socket socket = new Socket();
             try {
-                socket.connect(new InetSocketAddress(address, port), 5000);
+                socket.connect(new InetSocketAddress(pingAddress, pingPort), 5000);
                 time = SystemClock.elapsedRealtime() - start;
             } catch (Exception ignored) {
             } finally {
@@ -848,7 +875,12 @@ public class ConnectionsManager extends BaseController {
 
     private long checkRedirectProxy(ProxySettings settings, RequestTimeDelegate requestTimeDelegate) {
         final String address = settings.getAddress();
-        final int port = settings.getPort() != 0 ? settings.getPort() : 443;
+        int redirectPort = settings.getPort();
+        if (redirectPort == 0) {
+            // follow Direct connection settings: HTTP pins port 80, otherwise 443
+            redirectPort = getDirectPortModeSetting() == DIRECT_PORT_HTTP ? 80 : 443;
+        }
+        final int port = redirectPort;
         final long start = SystemClock.elapsedRealtime();
         Utilities.globalQueue.postRunnable(() -> {
             long time = -1;

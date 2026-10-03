@@ -233,8 +233,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
 
         public void setProxy(SharedConfig.ProxyInfo proxyInfo) {
             if (proxyInfo.isXray()) {
-                String title = !TextUtils.isEmpty(proxyInfo.proxyName) ? proxyInfo.proxyName : "Xray";
-                textView.setText(title + " (Xray)");
+                textView.setText(!TextUtils.isEmpty(proxyInfo.proxyName) ? proxyInfo.proxyName : "Xray");
             } else if (proxyInfo.isAether()) {
                 String title = !TextUtils.isEmpty(proxyInfo.proxyName) ? proxyInfo.proxyName : "Aether";
                 String detail = !TextUtils.isEmpty(proxyInfo.aetherProtocol) ? proxyInfo.aetherProtocol.toUpperCase() : "";

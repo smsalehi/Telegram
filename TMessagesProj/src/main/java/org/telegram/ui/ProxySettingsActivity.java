@@ -281,6 +281,13 @@ public class ProxySettingsActivity extends BaseFragment {
                     if (currentType == ProxySettings.Type.XRAY) {
                         currentProxyInfo.xrayConfig = inputFields[FIELD_XRAY_CONFIG].getText().toString();
                         currentProxyInfo.normalizeXrayFields();
+                        try {
+                            String remarks = new org.json.JSONObject(currentProxyInfo.xrayConfig).optString("remarks", "");
+                            if (!TextUtils.isEmpty(remarks)) {
+                                currentProxyInfo.proxyName = remarks;
+                            }
+                        } catch (Exception ignored) {
+                        }
                     } else if (currentType == ProxySettings.Type.AETHER) {
                         currentProxyInfo.aetherProtocol = aetherFieldValue(FIELD_AETHER_PROTOCOL, AETHER_PROTOCOL_LABELS, AETHER_PROTOCOL_VALUES);
                         currentProxyInfo.aetherScan = aetherFieldValue(FIELD_AETHER_SCAN, AETHER_SCAN_LABELS, AETHER_SCAN_VALUES);
@@ -1239,6 +1246,14 @@ public class ProxySettingsActivity extends BaseFragment {
                 redirectImportCell.setVisibility(View.GONE);
             } else if (isRedirect) {
                 redirectImportCell.setVisibility(View.VISIBLE);
+                redownloadCell.setVisibility(View.GONE);
+                xrayStatusCell.setVisibility(View.GONE);
+                if (aetherStatusCell != null) {
+                    aetherStatusCell.setVisibility(View.GONE);
+                }
+                importConfigCell.setVisibility(View.GONE);
+                xrayLogCell.setVisibility(View.GONE);
+                ((View) inputFields[FIELD_XRAY_CONFIG].getParent()).setVisibility(View.GONE);
                 bottomCells[0].setVisibility(View.GONE);
                 bottomCells[1].setVisibility(View.GONE);
                 bottomCells[2].setVisibility(View.VISIBLE);
