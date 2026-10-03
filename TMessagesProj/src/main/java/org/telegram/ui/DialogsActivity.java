@@ -10243,8 +10243,27 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         final SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
         boolean proxyEnabled = preferences.getBoolean("proxy_enabled", false);
         final boolean connected = currentConnectionState == ConnectionsManager.ConnectionStateConnected || currentConnectionState == ConnectionsManager.ConnectionStateUpdating;
-        proxyMenuSubItem.setSubtext(getString(proxyEnabled ? (connected ? R.string.MenuProxyConnected : R.string.MenuProxyConnecting) : R.string.MenuProxyDisabled));
+        String subtext = getString(proxyEnabled ? (connected ? R.string.MenuProxyConnected : R.string.MenuProxyConnecting) : R.string.MenuProxyDisabled);
+        if (proxyEnabled && SharedConfig.currentProxy != null) {
+            subtext += " (" + proxyMethodName(SharedConfig.currentProxy) + ")";
+        }
+        proxyMenuSubItem.setSubtext(subtext);
         proxyDrawable.setConnected(proxyEnabled, connected, animated);
+    }
+
+    private String proxyMethodName(SharedConfig.ProxyInfo info) {
+        if (info == null || info.settings == null) {
+            return "Proxy";
+        }
+        switch (info.settings.getType()) {
+            case SOCKS5: return "SOCKS5";
+            case MTPROTO: return "MTProto";
+            case WEB: return "Web";
+            case XRAY: return "Xray";
+            case AETHER: return "Aether";
+            case REDIRECT_IP: return "Redirect";
+            default: return "Proxy";
+        }
     }
 
     private AnimatorSet doneItemAnimator;
