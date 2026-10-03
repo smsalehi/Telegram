@@ -32,6 +32,7 @@ import android.widget.TextView;
 //import com.google.mlkit.nl.translate.TranslateLanguage;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.GeminiTranslator;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.LocaleController;
@@ -114,7 +115,7 @@ public class TranslateButton extends FrameLayout implements Theme.Colorable {
         menuView.setImageResource(R.drawable.msg_mini_customize);
         menuView.setOnClickListener(e -> {
             final TLRPC.Chat chat = MessagesController.getInstance(currentAccount).getChat(-dialogId);
-            if (UserConfig.getInstance(currentAccount).isPremium() || chat != null && chat.autotranslation) {
+            if (UserConfig.getInstance(currentAccount).isPremium() || chat != null && chat.autotranslation || GeminiTranslator.isEnabled() && GeminiTranslator.isAutoTranslate()) {
                 onMenuClick();
             } else {
                 onCloseClick();

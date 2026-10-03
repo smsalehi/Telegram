@@ -15,6 +15,7 @@ import org.json.JSONObject;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
+import java.util.ArrayDeque;
 import java.io.FilterInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -274,11 +275,35 @@ public class XrayProxyManager {
         setState(STATE_IDLE, null);
     }
 
+    private static final ArrayDeque<String> logLines = new ArrayDeque<>();
+    private static final int MAX_LOG_LINES = 400;
+
+    /** Recent xray core output (oldest first) for the in-app log viewer. */
+    public static String getLogText() {
+        synchronized (logLines) {
+            StringBuilder sb = new StringBuilder();
+            for (String line : logLines) {
+                sb.append(line).append('\n');
+            }
+            return sb.toString();
+        }
+    }
+
+    private static void appendLogLine(String line) {
+        synchronized (logLines) {
+            logLines.addLast(line);
+            while (logLines.size() > MAX_LOG_LINES) {
+                logLines.removeFirst();
+            }
+        }
+    }
+
     private static void startLogReader(final InputStream inputStream) {
         new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
+                    appendLogLine(line);
                     if (BuildVars.LOGS_ENABLED) {
                         FileLog.d("xray: " + line);
                     }

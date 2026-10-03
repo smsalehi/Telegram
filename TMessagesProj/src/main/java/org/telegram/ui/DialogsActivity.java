@@ -3269,6 +3269,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             directMenuSubItem.setItemHeight(56);
             directMenuSubItem.setTextAndIcon(getString(R.string.DirectSettings), R.drawable.msg_filled_datausage, null);
             directMenuSubItem.setContentDescription(getString(R.string.DirectSettings));
+            directMenuSubItem.setSubtext(getDirectStatusText());
 
             passcodeItem = menu.addItem(1, R.drawable.outline_header_lock_24);
             passcodeItem.setContentDescription(getString(R.string.AccDescrPasscodeLock));
@@ -13778,8 +13779,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         }
 
         if (directMenuSubItem != null) {
-            directMenuSubItem.subtextView.setTextColor(getThemedColor(Theme.key_groupcreate_sectionText));
             directMenuSubItem.setSubtext(getDirectStatusText());
+            directMenuSubItem.setSubtextColor(getThemedColor(Theme.key_groupcreate_sectionText));
             directMenuSubItem.setOnClickListener(v -> {
                 io.dismiss();
                 presentFragment(new DirectSettingsActivity());

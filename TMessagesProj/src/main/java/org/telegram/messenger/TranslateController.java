@@ -231,9 +231,39 @@ public class TranslateController extends BaseController {
         return chat != null && chat.autotranslation;
     }
 
+    private final LongSparseArray<Long> geminiAutoCooldowns = new LongSparseArray<>();
+    private static final long GEMINI_AUTO_FAIL_COOLDOWN_MS = 5 * 60 * 1000L;
+
+    private boolean isGeminiAutoSuspended(long dialogId) {
+        Long until = geminiAutoCooldowns.get(dialogId);
+        if (until == null) {
+            return false;
+        }
+        if (android.os.SystemClock.elapsedRealtime() > until) {
+            geminiAutoCooldowns.remove(dialogId);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * A translation attempt failed. With Gemini auto-translate on we only
+     * suspend the dialog for a few minutes instead of persisting an off
+     * state, so entering the chat later retries; with server translation
+     * the upstream behaviour (per-dialog switch off) is kept.
+     */
+    private void onTranslationFailed(long dialogId, boolean rateLimit) {
+        if (GeminiTranslator.isEnabled() && GeminiTranslator.isAutoTranslate()) {
+            geminiAutoCooldowns.put(dialogId, android.os.SystemClock.elapsedRealtime() + GEMINI_AUTO_FAIL_COOLDOWN_MS);
+        } else {
+            toggleTranslatingDialog(dialogId, false);
+        }
+        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_ERROR, getString(rateLimit ? R.string.TranslationFailedAlert1 : R.string.TranslationFailedAlert2));
+    }
+
     public boolean isTranslatingDialog(long dialogId) {
         if (GeminiTranslator.isEnabled() && GeminiTranslator.isAutoTranslate() && translatingDialogs.indexOfKey(dialogId) < 0) {
-            return isFeatureAvailable(dialogId);
+            return isFeatureAvailable(dialogId) && !isGeminiAutoSuspended(dialogId);
         }
         return isFeatureAvailable(dialogId) && translatingDialogs.get(dialogId, isChatAutoTranslated(dialogId));
     }
@@ -663,7 +693,7 @@ public class TranslateController extends BaseController {
 
         if (onScreen && isTranslatingDialog(dialogId)) {
             final MessageObject finalMessageObject = messageObject;
-            if (finalMessageObject.type == MessageObject.TYPE_ARTICLE) {
+            if (finalMessageObject.type == MessageObject.TYPE_ARTICLE && !(GeminiTranslator.isEnabled() && GeminiTranslator.isAutoTranslate())) {
                 if (finalMessageObject.messageOwner.translatedRichMessage == null || !language.equals(finalMessageObject.messageOwner.translatedToLanguage)) {
                     NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.messageTranslating, finalMessageObject);
                     pushRichMessageToTranslate(finalMessageObject, language, (id, rich, lang) -> {
@@ -1165,8 +1195,7 @@ public class TranslateController extends BaseController {
                                 resultWithEntities.text = result;
                                 _callback.run(isTranscription, id, resultWithEntities, toLanguage);
                             } else {
-                                toggleTranslatingDialog(dialogId, false);
-                                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_ERROR, getString(rateLimit ? R.string.TranslationFailedAlert1 : R.string.TranslationFailedAlert2));
+                                onTranslationFailed(dialogId, rateLimit);
                             }
                         });
                     }
@@ -1230,14 +1259,12 @@ public class TranslateController extends BaseController {
                                     resultWithEntities.text = result;
                                     _callback.run(isTranscription, id, resultWithEntities, toLanguage);
                                 } else {
-                                    toggleTranslatingDialog(dialogId, false);
-                                    NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_ERROR, getString(rateLimit ? R.string.TranslationFailedAlert1 : R.string.TranslationFailedAlert2));
+                                    onTranslationFailed(dialogId, rateLimit);
                                 }
                             });
                         }
                     } else if (err != null && "TO_LANG_INVALID".equals(err.text)) {
-                        toggleTranslatingDialog(dialogId, false);
-                        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_ERROR, getString(R.string.TranslationFailedAlert2));
+                        onTranslationFailed(dialogId, false);
                     } else {
                         if (err != null && "QUOTA_EXCEEDED".equals(err.text)) {
                             NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_ERROR, getString(R.string.TranslationFailedAlert1));
@@ -1381,6 +1408,10 @@ public class TranslateController extends BaseController {
         if (message == null || message.getId() < 0 || callback == null) {
             return;
         }
+        if (GeminiTranslator.isEnabled() && GeminiTranslator.isAutoTranslate()) {
+            // polls would need the premium server endpoint; leave them as-is
+            return;
+        }
 
         long dialogId = message.getDialogId();
 
@@ -1506,8 +1537,7 @@ public class TranslateController extends BaseController {
                             callbacks.get(j).run(ids.get(j), result.get(j), pendingTranslation1.language);
                         }
                     } else if (err != null && "TO_LANG_INVALID".equals(err.text)) {
-                        toggleTranslatingDialog(dialogId, false);
-                        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_ERROR, getString(R.string.TranslationFailedAlert2));
+                        onTranslationFailed(dialogId, false);
                     } else {
                         if (err != null && "QUOTA_EXCEEDED".equals(err.text)) {
                             NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_ERROR, getString(R.string.TranslationFailedAlert1));
@@ -1550,6 +1580,10 @@ public class TranslateController extends BaseController {
         Utilities.Callback3<Integer, TL_iv.RichMessage, String> callback
     ) {
         if (message == null || message.messageOwner == null || message.getId() < 0 || callback == null) {
+            return;
+        }
+        if (GeminiTranslator.isEnabled() && GeminiTranslator.isAutoTranslate()) {
+            // rich (web preview) translation is a premium server endpoint; leave as-is
             return;
         }
         if (message.messageOwner.rich_message == null) {
@@ -1621,8 +1655,7 @@ public class TranslateController extends BaseController {
                             callbacks.get(i).run(ids.get(i), translated.get(i), pendingTranslation1.language);
                         }
                     } else if (err != null && "TO_LANG_INVALID".equals(err.text)) {
-                        toggleTranslatingDialog(dialogId, false);
-                        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_ERROR, getString(R.string.TranslationFailedAlert2));
+                        onTranslationFailed(dialogId, false);
                     } else {
                         if (err != null && "QUOTA_EXCEEDED".equals(err.text)) {
                             NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_ERROR, getString(R.string.TranslationFailedAlert1));

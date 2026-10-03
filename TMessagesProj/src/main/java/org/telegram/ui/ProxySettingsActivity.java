@@ -129,6 +129,8 @@ public class ProxySettingsActivity extends BaseFragment {
     private TextSettingsCell shareCell;
     private TextSettingsCell pasteCell;
     private TextSettingsCell importConfigCell;
+    private TextSettingsCell xrayLogCell;
+    private TextSettingsCell redirectImportCell;
     private TextSettingsCell redownloadCell;
     private TextSettingsCell xrayStatusCell;
     private TextSettingsCell aetherStatusCell;
@@ -167,6 +169,7 @@ public class ProxySettingsActivity extends BaseFragment {
 
     private static final int done_button = 1;
     private static final int IMPORT_CONFIG_REQUEST = 17501;
+    private static final int IMPORT_IPS_REQUEST = 17502;
 
     public static class TypeCell extends FrameLayout {
 
@@ -392,7 +395,7 @@ public class ProxySettingsActivity extends BaseFragment {
         inputFields = new EditTextBoldCursor[FIELD_COUNT];
         for (int a = 0; a < FIELD_COUNT; a++) {
             FrameLayout container = new FrameLayout(context);
-            inputFieldsContainer.addView(container, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, a == FIELD_XRAY_CONFIG ? AndroidUtilities.dp(320) : AndroidUtilities.dp(64)));
+            inputFieldsContainer.addView(container, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, a == FIELD_XRAY_CONFIG ? 320 : 64));
 
             inputFields[a] = new EditTextBoldCursor(context);
             inputFields[a].setTag(a);
@@ -486,6 +489,15 @@ public class ProxySettingsActivity extends BaseFragment {
                 inputFields[a].setMaxLines(14);
                 inputFields[a].setGravity((LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.TOP);
                 inputFields[a].setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+                inputFields[a].setVerticalScrollBarEnabled(true);
+                inputFields[a].setLineColors(0x00000000, 0x00000000, 0x00000000);
+                inputFields[a].setOnTouchListener((v, event) -> {
+                    // let the JSON text scroll inside the field instead of the page
+                    if (v.hasFocus()) {
+                        v.getParent().requestDisallowInterceptTouchEvent(true);
+                    }
+                    return false;
+                });
                 inputFields[a].addTextChangedListener(new TextWatcher() {
                     @Override
                     public void beforeTextChanged(CharSequence s, int start, int count, int after) {
@@ -828,6 +840,34 @@ public class ProxySettingsActivity extends BaseFragment {
             }
         });
 
+        xrayLogCell = new TextSettingsCell(context);
+        xrayLogCell.setBackgroundDrawable(Theme.getSelectorDrawable(true));
+        xrayLogCell.setText(LocaleController.getString(R.string.XrayProxyViewLog), false);
+        xrayLogCell.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4));
+        xrayLogCell.setVisibility(View.GONE);
+        linearLayout2.addView(xrayLogCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        xrayLogCell.setOnClickListener(v -> showXrayLog());
+
+        redirectImportCell = new TextSettingsCell(context);
+        redirectImportCell.setBackgroundDrawable(Theme.getSelectorDrawable(true));
+        redirectImportCell.setText(LocaleController.getString(R.string.XrayProxyImportIps), false);
+        redirectImportCell.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4));
+        redirectImportCell.setVisibility(View.GONE);
+        linearLayout2.addView(redirectImportCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        redirectImportCell.setOnClickListener(v -> {
+            if (getParentActivity() == null) {
+                return;
+            }
+            try {
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("*/*");
+                startActivityForResult(intent, IMPORT_IPS_REQUEST);
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+        });
+
         xrayStatusCell = new TextSettingsCell(context);
         xrayStatusCell.setBackgroundDrawable(Theme.getSelectorDrawable(true));
         xrayStatusCell.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
@@ -1129,6 +1169,7 @@ public class ProxySettingsActivity extends BaseFragment {
             boolean isRedirect = currentType == ProxySettings.Type.REDIRECT_IP;
             // Aether needs no server address/port: the engine dials Cloudflare itself.
             ((View) inputFields[FIELD_IP].getParent()).setVisibility(isAether || isXray ? View.GONE : View.VISIBLE);
+            redirectImportCell.setVisibility(View.GONE);
             if (currentType == ProxySettings.Type.SOCKS5) {
                 bottomCells[0].setVisibility(View.VISIBLE);
                 bottomCells[1].setVisibility(View.GONE);
@@ -1174,6 +1215,8 @@ public class ProxySettingsActivity extends BaseFragment {
                 ((View) inputFields[FIELD_PORT].getParent()).setVisibility(View.GONE);
                 ((View) inputFields[FIELD_XRAY_CONFIG].getParent()).setVisibility(View.VISIBLE);
                 importConfigCell.setVisibility(View.VISIBLE);
+                xrayLogCell.setVisibility(View.VISIBLE);
+                redirectImportCell.setVisibility(View.GONE);
             } else if (isAether) {
                 bottomCells[0].setVisibility(View.GONE);
                 bottomCells[1].setVisibility(View.GONE);
@@ -1192,7 +1235,10 @@ public class ProxySettingsActivity extends BaseFragment {
                 ((View) inputFields[FIELD_PORT].getParent()).setVisibility(View.GONE);
                 ((View) inputFields[FIELD_XRAY_CONFIG].getParent()).setVisibility(View.GONE);
                 importConfigCell.setVisibility(View.GONE);
+                xrayLogCell.setVisibility(View.GONE);
+                redirectImportCell.setVisibility(View.GONE);
             } else if (isRedirect) {
+                redirectImportCell.setVisibility(View.VISIBLE);
                 bottomCells[0].setVisibility(View.GONE);
                 bottomCells[1].setVisibility(View.GONE);
                 bottomCells[2].setVisibility(View.VISIBLE);
@@ -1205,10 +1251,11 @@ public class ProxySettingsActivity extends BaseFragment {
             for (int f = FIELD_AETHER_PROTOCOL; f <= FIELD_AETHER_NAME; f++) {
                 ((View) inputFields[f].getParent()).setVisibility(isAether ? View.VISIBLE : View.GONE);
             }
-            if (!isXray && !isAether) {
+            if (!isXray && !isAether && !isRedirect) {
                 redownloadCell.setVisibility(View.GONE);
                 xrayStatusCell.setVisibility(View.GONE);
                 importConfigCell.setVisibility(View.GONE);
+                xrayLogCell.setVisibility(View.GONE);
                 ((View) inputFields[FIELD_XRAY_CONFIG].getParent()).setVisibility(View.GONE);
                 if (aetherStatusCell != null) {
                     aetherStatusCell.setVisibility(View.GONE);
@@ -1239,9 +1286,99 @@ public class ProxySettingsActivity extends BaseFragment {
         }
     }
 
+    private void showXrayLog() {
+        if (getParentActivity() == null) {
+            return;
+        }
+        String log = XrayProxyManager.getLogText();
+        if (log == null || log.trim().isEmpty()) {
+            log = LocaleController.getString(R.string.XrayProxyLogEmpty);
+        }
+        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+        builder.setTitle(LocaleController.getString(R.string.XrayProxyViewLog));
+        ScrollView scroll = new ScrollView(getParentActivity());
+        TextView textView = new TextView(getParentActivity());
+        textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+        textView.setTypeface(Typeface.MONOSPACE);
+        textView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
+        textView.setPadding(AndroidUtilities.dp(20), AndroidUtilities.dp(10), AndroidUtilities.dp(20), AndroidUtilities.dp(10));
+        textView.setText(log);
+        scroll.addView(textView);
+        builder.setView(scroll);
+        builder.setPositiveButton(LocaleController.getString(R.string.Copy), (dialog, which) -> {
+            try {
+                android.content.ClipboardManager cm = (android.content.ClipboardManager) getParentActivity().getSystemService(Context.CLIPBOARD_SERVICE);
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("xray-log", log));
+            } catch (Throwable ignored) {}
+        });
+        builder.setNegativeButton(LocaleController.getString(R.string.Close), null);
+        showDialog(builder.create());
+    }
+
+    private void importRedirectIps(Uri uri) {
+        ArrayList<SharedConfig.ProxyInfo> added = new ArrayList<>();
+        try {
+            StringBuilder sb = new StringBuilder();
+            try (java.io.InputStream in = getParentActivity().getContentResolver().openInputStream(uri);
+                 java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(in, "UTF-8"))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line).append('\n');
+                }
+            }
+            for (String rawLine : sb.toString().split("\n")) {
+                String entry = rawLine.trim();
+                if (entry.isEmpty() || entry.startsWith("#")) {
+                    continue;
+                }
+                String ip = entry;
+                int port = 0;
+                int colon = entry.lastIndexOf(':');
+                if (colon > 0) {
+                    ip = entry.substring(0, colon).trim();
+                    String portText = entry.substring(colon + 1).trim();
+                    try {
+                        port = Integer.parseInt(portText);
+                    } catch (NumberFormatException ignored) {
+                        port = -1;
+                    }
+                }
+                if (!GeminiTranslator.isValidIpv4(ip) || port < 0 || port > 65535) {
+                    continue;
+                }
+                SharedConfig.ProxyInfo info = new SharedConfig.ProxyInfo(
+                        ProxySettings.builder()
+                                .setType(ProxySettings.Type.REDIRECT_IP)
+                                .setAddress(ip)
+                                .setPort(port)
+                                .build()
+                );
+                SharedConfig.ProxyInfo existing = SharedConfig.addProxy(info);
+                if (existing == info) {
+                    added.add(info);
+                }
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+        if (getParentActivity() != null) {
+            String message = added.isEmpty()
+                    ? LocaleController.getString(R.string.XrayProxyNoValidIps)
+                    : LocaleController.formatString(R.string.XrayProxyImportedCount, added.size());
+            Toast.makeText(getParentActivity(), message, Toast.LENGTH_SHORT).show();
+        }
+    }
+
     @Override
     public void onActivityResultFragment(int requestCode, int resultCode, Intent data) {
-        if (requestCode != IMPORT_CONFIG_REQUEST || resultCode != Activity.RESULT_OK || data == null || data.getData() == null) {
+        if (resultCode != Activity.RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+        if (requestCode == IMPORT_IPS_REQUEST) {
+            importRedirectIps(data.getData());
+            return;
+        }
+        if (requestCode != IMPORT_CONFIG_REQUEST) {
             return;
         }
         try {
@@ -1275,6 +1412,9 @@ public class ProxySettingsActivity extends BaseFragment {
             }
             if (inputFields != null) {
                 for (int i = 0; i < inputFields.length; i++) {
+                    if (i == FIELD_XRAY_CONFIG) {
+                        continue;
+                    }
                     inputFields[i].setLineColors(Theme.getColor(Theme.key_windowBackgroundWhiteInputField),
                             Theme.getColor(Theme.key_windowBackgroundWhiteInputFieldActivated),
                             Theme.getColor(Theme.key_text_RedRegular));

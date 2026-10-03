@@ -2700,6 +2700,11 @@
     <string name="UseProxyXrayConfig">Xray config (JSON)</string>
     <string name="XrayProxyImportConfig">Import config from file</string>
     <string name="XrayProxyInvalidConfig">Invalid Xray config</string>
+    <string name="XrayProxyViewLog">View Xray log</string>
+    <string name="XrayProxyLogEmpty">No xray output yet</string>
+    <string name="XrayProxyImportIps">Import IP list from file</string>
+    <string name="XrayProxyNoValidIps">No valid IP:Port lines found</string>
+    <string name="XrayProxyImportedCount">Imported %1$d entries</string>
     <string name="XrayProxy">Xray Proxy</string>
     <string name="XrayProxyRunning">Xray proxy is running</string>
     <string name="XrayProxyStarting">Starting Xray proxy...</string>
