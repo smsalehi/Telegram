@@ -28,7 +28,7 @@ public final class ProxySettings {
         SOCKS5,
         MTPROTO,
         WEB,
-        XRAY_VLESS,
+        XRAY,
         AETHER,
         REDIRECT_IP
     }
@@ -59,7 +59,7 @@ public final class ProxySettings {
             port = builder.port;
             user = builder.user;
             password = builder.password;
-        } else if (type == Type.XRAY_VLESS) {
+        } else if (type == Type.XRAY) {
             secret = "";
             port = builder.port;
             user = "";
@@ -112,7 +112,7 @@ public final class ProxySettings {
         if (TextUtils.isEmpty(address)) {
             return false;
         }
-        if (type == Type.REDIRECT_IP) {
+        if (type == Type.REDIRECT_IP || type == Type.XRAY) {
             return port >= 0;
         }
         return type == Type.WEB
@@ -233,7 +233,7 @@ public final class ProxySettings {
                 editor.remove("proxy_pass");
                 editor.remove("proxy_user");
                 break;
-            case XRAY_VLESS:
+            case XRAY:
                 editor.putInt("proxy_port", port);
                 editor.remove("proxy_secret");
                 editor.remove("proxy_pass");
@@ -562,7 +562,7 @@ public final class ProxySettings {
                 return 1;
             case WEB:
                 return 2;
-            case XRAY_VLESS:
+            case XRAY:
                 return 3;
             case AETHER:
                 return 4;
@@ -581,7 +581,7 @@ public final class ProxySettings {
             case 2:
                 return Type.WEB;
             case 3:
-                return Type.XRAY_VLESS;
+                return Type.XRAY;
             case 4:
                 return Type.AETHER;
             case 5:

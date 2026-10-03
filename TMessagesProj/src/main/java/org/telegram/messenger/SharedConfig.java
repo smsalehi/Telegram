@@ -64,7 +64,8 @@ public class SharedConfig {
     private final static int PROXY_SCHEMA_V3 = 3;
     private final static int PROXY_SCHEMA_V4 = 4;
     private final static int PROXY_SCHEMA_V5 = 5;
-    private final static int PROXY_CURRENT_SCHEMA_VERSION = PROXY_SCHEMA_V5;
+    private final static int PROXY_SCHEMA_V6 = 6;
+    private final static int PROXY_CURRENT_SCHEMA_VERSION = PROXY_SCHEMA_V6;
 
     public final static int PASSCODE_TYPE_PIN = 0,
             PASSCODE_TYPE_PASSWORD = 1;
@@ -386,33 +387,13 @@ public class SharedConfig {
         public boolean available;
         public long availableCheckTime;
 
-        // Xray VLESS fields (used when settings.getType() == ProxySettings.Type.XRAY_VLESS)
-        public String vlessId;
-        public String vlessEncryption;
-        public String vlessFlow;
-        public String vlessSecurity;
-        public String vlessType;
-        public String vlessSni;
-        public String vlessHost;
-        public String vlessPath;
-        public String vlessServiceName;
-        public String vlessFp;
-        public String vlessAlpn;
-        public String vlessPublicKey;
-        public String vlessShortId;
-        public String vlessSpiderX;
-        public String vlessHeaderType;
-        public String vlessSeed;
-        public String vlessQuicSecurity;
-        public String vlessQuicKey;
-        public String vlessMode;
-        public boolean vlessAllowInsecure;
-        public String vlessRemark;
+        // Xray fields (used when settings.getType() == ProxySettings.Type.XRAY):
+        // the raw, user-provided Xray JSON config. The local socks inbound is
+        // injected by XrayProxyManager when the config is written for the core.
+        public String xrayConfig = "";
         public boolean isSubscription;
         public String subscriptionName = "";
         public String proxyName = "";
-        public String vlessRawQuery;
-        public String vlessAdvancedJson;
 
         // Aether fields (used when settings.getType() == ProxySettings.Type.AETHER)
         public String aetherProtocol;
@@ -426,76 +407,13 @@ public class SharedConfig {
 
         public ProxyInfo(@NonNull ProxySettings proxySettings) {
             settings = proxySettings;
-            normalizeVlessFields();
+            normalizeXrayFields();
             normalizeAetherFields();
         }
 
-        public void normalizeVlessFields() {
-            if (this.vlessId == null) {
-                this.vlessId = "";
-            }
-            if (this.vlessFlow == null) {
-                this.vlessFlow = "";
-            }
-            if (this.vlessSecurity == null) {
-                this.vlessSecurity = "";
-            }
-            if (this.vlessType == null) {
-                this.vlessType = "";
-            }
-            if (this.vlessSni == null) {
-                this.vlessSni = "";
-            }
-            if (this.vlessHost == null) {
-                this.vlessHost = "";
-            }
-            if (this.vlessPath == null) {
-                this.vlessPath = "";
-            }
-            if (this.vlessServiceName == null) {
-                this.vlessServiceName = "";
-            }
-            if (this.vlessFp == null) {
-                this.vlessFp = "";
-            }
-            if (this.vlessAlpn == null) {
-                this.vlessAlpn = "";
-            }
-            if (this.vlessPublicKey == null) {
-                this.vlessPublicKey = "";
-            }
-            if (this.vlessShortId == null) {
-                this.vlessShortId = "";
-            }
-            if (this.vlessSpiderX == null) {
-                this.vlessSpiderX = "";
-            }
-            if (this.vlessHeaderType == null) {
-                this.vlessHeaderType = "";
-            }
-            if (this.vlessSeed == null) {
-                this.vlessSeed = "";
-            }
-            if (this.vlessQuicSecurity == null) {
-                this.vlessQuicSecurity = "";
-            }
-            if (this.vlessQuicKey == null) {
-                this.vlessQuicKey = "";
-            }
-            if (this.vlessMode == null) {
-                this.vlessMode = "";
-            }
-            if (this.vlessRemark == null) {
-                this.vlessRemark = "";
-            }
-            if (this.vlessRawQuery == null) {
-                this.vlessRawQuery = "";
-            }
-            if (this.vlessAdvancedJson == null) {
-                this.vlessAdvancedJson = "";
-            }
-            if (this.vlessEncryption == null) {
-                this.vlessEncryption = "none";
+        public void normalizeXrayFields() {
+            if (this.xrayConfig == null) {
+                this.xrayConfig = "";
             }
         }
 
@@ -520,8 +438,8 @@ public class SharedConfig {
             }
         }
 
-        public boolean isXrayVless() {
-            return settings != null && settings.getType() == ProxySettings.Type.XRAY_VLESS;
+        public boolean isXray() {
+            return settings != null && settings.getType() == ProxySettings.Type.XRAY;
         }
 
         public boolean isAether() {
@@ -532,55 +450,7 @@ public class SharedConfig {
             return settings != null && settings.getType() == ProxySettings.Type.REDIRECT_IP;
         }
 
-        public String getVlessLink() {
-            StringBuilder url = new StringBuilder("vless://");
-            try {
-                url.append(URLEncoder.encode(vlessId != null ? vlessId : "", "UTF-8"));
-                url.append("@").append(URLEncoder.encode(settings.getAddress(), "UTF-8"));
-                url.append(":").append(settings.getPort());
-                ArrayList<String> params = new ArrayList<>();
-                appendParam(params, "type", vlessType);
-                appendParam(params, "security", vlessSecurity);
-                appendParam(params, "encryption", vlessEncryption);
-                appendParam(params, "flow", vlessFlow);
-                appendParam(params, "sni", vlessSni);
-                appendParam(params, "fp", vlessFp);
-                appendParam(params, "alpn", vlessAlpn);
-                appendParam(params, "host", vlessHost);
-                appendParam(params, "path", vlessPath);
-                appendParam(params, "serviceName", vlessServiceName);
-                appendParam(params, "mode", vlessMode);
-                appendParam(params, "headerType", vlessHeaderType);
-                appendParam(params, "seed", vlessSeed);
-                appendParam(params, "quicSecurity", vlessQuicSecurity);
-                appendParam(params, "key", vlessQuicKey);
-                appendParam(params, "pbk", vlessPublicKey);
-                appendParam(params, "sid", vlessShortId);
-                appendParam(params, "spx", vlessSpiderX);
-                if (vlessAllowInsecure) {
-                    appendParam(params, "allowInsecure", "1");
-                }
-                if (!params.isEmpty()) {
-                    url.append("?").append(TextUtils.join("&", params));
-                }
-                if (!TextUtils.isEmpty(vlessRemark)) {
-                    url.append("#").append(URLEncoder.encode(vlessRemark, "UTF-8"));
-                }
-            } catch (UnsupportedEncodingException ignored) {}
-            return url.toString();
-        }
-
-        private static void appendParam(ArrayList<String> params, String key, String value) throws UnsupportedEncodingException {
-            if (TextUtils.isEmpty(value)) {
-                return;
-            }
-            params.add(URLEncoder.encode(key, "UTF-8") + "=" + URLEncoder.encode(value, "UTF-8"));
-        }
-
         public static ProxyInfo fromUrl(String url) {
-            if (url != null && url.toLowerCase().startsWith("vless://")) {
-                return fromVlessUrl(url);
-            }
             android.net.Uri lnk = android.net.Uri.parse(url);
             if (lnk == null) throw new IllegalArgumentException(url);
             ProxySettings settings = ProxySettings.fromUri(lnk);
@@ -591,102 +461,6 @@ public class SharedConfig {
                 info.proxyName = fragment;
             }
             return info;
-        }
-
-        public static ProxyInfo fromVlessUrl(String url) {            try {
-                java.net.URI uri = new java.net.URI(url);
-                int port = uri.getPort() > 0 ? uri.getPort() : 443;
-                ProxySettings settings = ProxySettings.builder()
-                        .setType(ProxySettings.Type.XRAY_VLESS)
-                        .setAddress(uri.getHost() != null ? uri.getHost() : "")
-                        .setPort(port)
-                        .build();
-                ProxyInfo info = new ProxyInfo(settings);
-                info.vlessId = uri.getUserInfo();
-                String rawQuery = uri.getRawQuery();
-                info.vlessRawQuery = rawQuery != null ? rawQuery : "";
-                info.vlessRemark = uri.getFragment() != null ? URLDecoder.decode(uri.getFragment(), "UTF-8") : "";
-                if (!TextUtils.isEmpty(rawQuery)) {
-                    String[] parts = rawQuery.split("&");
-                    for (String part : parts) {
-                        String[] pair = part.split("=", 2);
-                        if (pair.length != 2) {
-                            continue;
-                        }
-                        String key = URLDecoder.decode(pair[0], "UTF-8");
-                        String value = URLDecoder.decode(pair[1], "UTF-8");
-                        if (key == null) {
-                            continue;
-                        }
-                        switch (key.toLowerCase()) {
-                            case "encryption":
-                                info.vlessEncryption = value;
-                                break;
-                            case "flow":
-                                info.vlessFlow = value;
-                                break;
-                            case "security":
-                                info.vlessSecurity = value;
-                                break;
-                            case "type":
-                                info.vlessType = value;
-                                break;
-                            case "sni":
-                                info.vlessSni = value;
-                                break;
-                            case "host":
-                                info.vlessHost = value;
-                                break;
-                            case "path":
-                                info.vlessPath = value;
-                                break;
-                            case "servicename":
-                                info.vlessServiceName = value;
-                                break;
-                            case "fp":
-                                info.vlessFp = value;
-                                break;
-                            case "alpn":
-                                info.vlessAlpn = value;
-                                break;
-                            case "pbk":
-                                info.vlessPublicKey = value;
-                                break;
-                            case "sid":
-                                info.vlessShortId = value;
-                                break;
-                            case "spx":
-                                info.vlessSpiderX = value;
-                                break;
-                            case "headertype":
-                                info.vlessHeaderType = value;
-                                break;
-                            case "seed":
-                                info.vlessSeed = value;
-                                break;
-                            case "quicsecurity":
-                                info.vlessQuicSecurity = value;
-                                break;
-                            case "key":
-                                info.vlessQuicKey = value;
-                                break;
-                            case "mode":
-                                info.vlessMode = value;
-                                break;
-                            case "allowinsecure":
-                                info.vlessAllowInsecure = "1".equals(value) || "true".equalsIgnoreCase(value);
-                                break;
-                        }
-                    }
-                }
-                if (TextUtils.isEmpty(info.vlessEncryption)) {
-                    info.vlessEncryption = "none";
-                }
-                info.normalizeVlessFields();
-                return info;
-            } catch (Throwable e) {
-                throw new IllegalArgumentException(url, e);
-            }
         }
 
         private static ProxyInfo fromSerializedData(int version, InputSerializedData data) {
@@ -719,33 +493,25 @@ public class SharedConfig {
             info.available = ping > 0;
 
             if (version >= PROXY_SCHEMA_V4) {
-                info.vlessId = data.readString(false);
-                info.vlessEncryption = data.readString(false);
-                info.vlessFlow = data.readString(false);
-                info.vlessSecurity = data.readString(false);
-                info.vlessType = data.readString(false);
-                info.vlessSni = data.readString(false);
-                info.vlessHost = data.readString(false);
-                info.vlessPath = data.readString(false);
-                info.vlessServiceName = data.readString(false);
-                info.vlessFp = data.readString(false);
-                info.vlessAlpn = data.readString(false);
-                info.vlessPublicKey = data.readString(false);
-                info.vlessShortId = data.readString(false);
-                info.vlessSpiderX = data.readString(false);
-                info.vlessHeaderType = data.readString(false);
-                info.vlessSeed = data.readString(false);
-                info.vlessQuicSecurity = data.readString(false);
-                info.vlessQuicKey = data.readString(false);
-                info.vlessMode = data.readString(false);
-                info.vlessAllowInsecure = data.readBool(false);
-                info.vlessRemark = data.readString(false);
-                info.vlessRawQuery = data.readString(false);
-                info.vlessAdvancedJson = data.readString(false);
+                if (version < PROXY_SCHEMA_V6) {
+                    // legacy per-field VLESS entries: read and discard
+                    for (int i = 0; i < 19; ++i) {
+                        data.readString(false);
+                    }
+                    data.readBool(false);
+                    data.readString(false);
+                    data.readString(false);
+                    data.readString(false);
+                } else {
+                    info.xrayConfig = data.readString(false);
+                    if (info.xrayConfig == null) {
+                        info.xrayConfig = "";
+                    }
+                }
                 info.subscriptionName = data.readString(false);
                 info.proxyName = data.readString(false);
                 info.isSubscription = data.readBool(false);
-                info.normalizeVlessFields();
+                info.normalizeXrayFields();
             }
 
             if (version >= PROXY_SCHEMA_V5) {
@@ -772,29 +538,7 @@ public class SharedConfig {
             data.writeInt64(ping);
             data.writeInt64(availableCheckTime);
             data.writeInt32(ProxySettings.typeToInt(settings.getType()));
-            data.writeString(vlessId);
-            data.writeString(vlessEncryption);
-            data.writeString(vlessFlow);
-            data.writeString(vlessSecurity);
-            data.writeString(vlessType);
-            data.writeString(vlessSni);
-            data.writeString(vlessHost);
-            data.writeString(vlessPath);
-            data.writeString(vlessServiceName);
-            data.writeString(vlessFp);
-            data.writeString(vlessAlpn);
-            data.writeString(vlessPublicKey);
-            data.writeString(vlessShortId);
-            data.writeString(vlessSpiderX);
-            data.writeString(vlessHeaderType);
-            data.writeString(vlessSeed);
-            data.writeString(vlessQuicSecurity);
-            data.writeString(vlessQuicKey);
-            data.writeString(vlessMode);
-            data.writeBool(vlessAllowInsecure);
-            data.writeString(vlessRemark);
-            data.writeString(vlessRawQuery);
-            data.writeString(vlessAdvancedJson);
+            data.writeString(xrayConfig);
             data.writeString(subscriptionName != null ? subscriptionName : "");
             data.writeString(proxyName != null ? proxyName : "");
             data.writeBool(isSubscription);
@@ -1896,16 +1640,9 @@ public class SharedConfig {
                     info.subscriptionName = proxyInfo.subscriptionName;
                     changed = true;
                 }
-                if (info.isXrayVless()) {
-                    if (TextUtils.isEmpty(info.vlessRemark) && !TextUtils.isEmpty(proxyInfo.vlessRemark)) {
-                        info.vlessRemark = proxyInfo.vlessRemark;
-                        changed = true;
-                    }
-                } else {
-                    if (TextUtils.isEmpty(info.proxyName) && !TextUtils.isEmpty(proxyInfo.proxyName)) {
-                        info.proxyName = proxyInfo.proxyName;
-                        changed = true;
-                    }
+                if (TextUtils.isEmpty(info.proxyName) && !TextUtils.isEmpty(proxyInfo.proxyName)) {
+                    info.proxyName = proxyInfo.proxyName;
+                    changed = true;
                 }
                 if (changed) {
                     saveProxyList();
@@ -1928,27 +1665,8 @@ public class SharedConfig {
         if (!Objects.equals(a.settings, b.settings)) {
             return false;
         }
-        if (a.isXrayVless() && b.isXrayVless()) {
-            return TextUtils.equals(a.vlessId, b.vlessId)
-                    && TextUtils.equals(a.vlessSecurity, b.vlessSecurity)
-                    && TextUtils.equals(a.vlessType, b.vlessType)
-                    && TextUtils.equals(a.vlessFlow, b.vlessFlow)
-                    && TextUtils.equals(a.vlessHost, b.vlessHost)
-                    && TextUtils.equals(a.vlessPath, b.vlessPath)
-                    && TextUtils.equals(a.vlessServiceName, b.vlessServiceName)
-                    && TextUtils.equals(a.vlessSni, b.vlessSni)
-                    && TextUtils.equals(a.vlessFp, b.vlessFp)
-                    && TextUtils.equals(a.vlessAlpn, b.vlessAlpn)
-                    && TextUtils.equals(a.vlessPublicKey, b.vlessPublicKey)
-                    && TextUtils.equals(a.vlessShortId, b.vlessShortId)
-                    && TextUtils.equals(a.vlessSpiderX, b.vlessSpiderX)
-                    && TextUtils.equals(a.vlessHeaderType, b.vlessHeaderType)
-                    && TextUtils.equals(a.vlessSeed, b.vlessSeed)
-                    && TextUtils.equals(a.vlessQuicSecurity, b.vlessQuicSecurity)
-                    && TextUtils.equals(a.vlessQuicKey, b.vlessQuicKey)
-                    && TextUtils.equals(a.vlessMode, b.vlessMode)
-                    && a.vlessAllowInsecure == b.vlessAllowInsecure
-                    && TextUtils.equals(a.vlessAdvancedJson, b.vlessAdvancedJson);
+        if (a.isXray() && b.isXray()) {
+            return TextUtils.equals(a.xrayConfig, b.xrayConfig);
         }
         if (a.isAether() && b.isAether()) {
             return TextUtils.equals(a.aetherProtocol, b.aetherProtocol)
@@ -1984,7 +1702,7 @@ public class SharedConfig {
             if (enabled) {
                 ConnectionsManager.setProxySettings(false, null);
             }
-            if (proxyInfo.isXrayVless()) {
+            if (proxyInfo.isXray()) {
                 XrayProxyManager.stopService();
             }
             if (proxyInfo.isAether()) {

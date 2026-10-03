@@ -331,8 +331,7 @@ public class ProxyUtil {
             if (line.startsWith("tg://proxy") ||
                     line.startsWith("tg://socks") ||
                     line.startsWith("https://t.me/proxy") ||
-                    line.startsWith("https://t.me/socks") ||
-                    line.startsWith("vless://")) {
+                    line.startsWith("https://t.me/socks")) {
                 try {
                     proxies.add(SharedConfig.ProxyInfo.fromUrl(line));
                 } catch (Throwable e) {
@@ -450,133 +449,17 @@ public class ProxyUtil {
         if (outbounds == null || outbounds.length() == 0) {
             return null;
         }
-        JSONObject outbound = null;
-        for (int i = 0; i < outbounds.length(); i++) {
-            JSONObject candidate = outbounds.optJSONObject(i);
-            if (candidate == null) {
-                continue;
-            }
-            String protocol = candidate.optString("protocol", "");
-            if ("vless".equalsIgnoreCase(protocol)) {
-                if ("proxy".equalsIgnoreCase(candidate.optString("tag", ""))) {
-                    outbound = candidate;
-                    break;
-                }
-                if (outbound == null) {
-                    outbound = candidate;
-                }
-            }
-        }
-        if (outbound == null) {
-            return null;
-        }
-        JSONObject settings = outbound.optJSONObject("settings");
-        JSONArray vnext = settings != null ? settings.optJSONArray("vnext") : null;
-        JSONObject server = vnext != null && vnext.length() > 0 ? vnext.optJSONObject(0) : null;
-        if (server == null) {
-            return null;
-        }
-        String address = server.optString("address", "");
-        int port = server.optInt("port", 0);
-        JSONArray users = server.optJSONArray("users");
-        JSONObject user = users != null && users.length() > 0 ? users.optJSONObject(0) : null;
-        if (TextUtils.isEmpty(address) || port <= 0 || user == null) {
-            return null;
-        }
         SharedConfig.ProxyInfo info = new SharedConfig.ProxyInfo(
                 ProxySettings.builder()
-                        .setType(ProxySettings.Type.XRAY_VLESS)
-                        .setAddress(address)
-                        .setPort(port)
+                        .setType(ProxySettings.Type.XRAY)
+                        .setAddress("xray")
+                        .setPort(0)
                         .build()
         );
-        info.vlessId = user.optString("id", "");
-        info.vlessEncryption = user.optString("encryption", "none");
-        info.vlessFlow = user.optString("flow", "");
+        info.xrayConfig = config.toString();
         String remarks = config.optString("remarks", "");
         if (!TextUtils.isEmpty(remarks)) {
-            info.vlessRemark = remarks;
-        }
-
-        JSONObject stream = outbound.optJSONObject("streamSettings");
-        if (stream != null) {
-            info.vlessType = stream.optString("network", "");
-            info.vlessSecurity = stream.optString("security", "");
-
-            JSONObject tls = stream.optJSONObject("tlsSettings");
-            if (tls != null) {
-                info.vlessSni = tls.optString("serverName", info.vlessSni);
-                info.vlessFp = tls.optString("fingerprint", info.vlessFp);
-                JSONArray alpn = tls.optJSONArray("alpn");
-                if (alpn != null && alpn.length() > 0) {
-                    StringBuilder sb = new StringBuilder();
-                    for (int i = 0; i < alpn.length(); i++) {
-                        if (i > 0) sb.append(",");
-                        sb.append(alpn.optString(i));
-                    }
-                    info.vlessAlpn = sb.toString();
-                }
-                info.vlessAllowInsecure = tls.optBoolean("allowInsecure", info.vlessAllowInsecure);
-            }
-
-            JSONObject reality = stream.optJSONObject("realitySettings");
-            if (reality != null) {
-                info.vlessSni = reality.optString("serverName", info.vlessSni);
-                info.vlessFp = reality.optString("fingerprint", info.vlessFp);
-                info.vlessPublicKey = reality.optString("publicKey", info.vlessPublicKey);
-                info.vlessShortId = reality.optString("shortId", info.vlessShortId);
-                info.vlessSpiderX = reality.optString("spiderX", info.vlessSpiderX);
-            }
-
-            JSONObject ws = stream.optJSONObject("wsSettings");
-            if (ws != null) {
-                info.vlessPath = ws.optString("path", info.vlessPath);
-                JSONObject headers = ws.optJSONObject("headers");
-                if (headers != null) {
-                    info.vlessHost = headers.optString("Host", info.vlessHost);
-                }
-            }
-
-            JSONObject grpc = stream.optJSONObject("grpcSettings");
-            if (grpc != null) {
-                info.vlessServiceName = grpc.optString("serviceName", info.vlessServiceName);
-                if (grpc.optBoolean("multiMode", false)) {
-                    info.vlessMode = "multi";
-                }
-            }
-
-            JSONObject http = stream.optJSONObject("httpSettings");
-            if (http != null) {
-                info.vlessPath = http.optString("path", info.vlessPath);
-                JSONArray host = http.optJSONArray("host");
-                if (host != null && host.length() > 0) {
-                    StringBuilder sb = new StringBuilder();
-                    for (int i = 0; i < host.length(); i++) {
-                        if (i > 0) sb.append(",");
-                        sb.append(host.optString(i));
-                    }
-                    info.vlessHost = sb.toString();
-                }
-            }
-
-            JSONObject kcp = stream.optJSONObject("kcpSettings");
-            if (kcp != null) {
-                info.vlessSeed = kcp.optString("seed", info.vlessSeed);
-                JSONObject header = kcp.optJSONObject("header");
-                if (header != null) {
-                    info.vlessHeaderType = header.optString("type", info.vlessHeaderType);
-                }
-            }
-
-            JSONObject quic = stream.optJSONObject("quicSettings");
-            if (quic != null) {
-                info.vlessQuicSecurity = quic.optString("security", info.vlessQuicSecurity);
-                info.vlessQuicKey = quic.optString("key", info.vlessQuicKey);
-                JSONObject header = quic.optJSONObject("header");
-                if (header != null) {
-                    info.vlessHeaderType = header.optString("type", info.vlessHeaderType);
-                }
-            }
+            info.proxyName = remarks;
         }
         return info;
     }

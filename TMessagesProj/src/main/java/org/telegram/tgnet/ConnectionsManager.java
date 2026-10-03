@@ -644,7 +644,7 @@ public class ConnectionsManager extends BaseController {
         final SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
         final ProxySettings proxySettings = ProxySettings.fromSharedPreferences(preferences);
         if (preferences.getBoolean("proxy_enabled", false) && proxySettings.isValid()) {
-            if (proxySettings.getType() == ProxySettings.Type.XRAY_VLESS) {
+            if (proxySettings.getType() == ProxySettings.Type.XRAY) {
                 AetherProxyManager.stopProcess();
                 XrayProxyManager.startService();
                 if (XrayProxyManager.isSocksReady()) {
@@ -773,7 +773,7 @@ public class ConnectionsManager extends BaseController {
             WebProxyConnectionTester.getInstance().checkProxy(settings, requestTimeDelegate, this::checkWebProxyInternal);
             return 0;
         }
-        if (settings.getType() == ProxySettings.Type.XRAY_VLESS) {
+        if (settings.getType() == ProxySettings.Type.XRAY) {
             return checkXrayProxy(settings, requestTimeDelegate);
         }
         if (settings.getType() == ProxySettings.Type.AETHER) {
@@ -1067,7 +1067,7 @@ public class ConnectionsManager extends BaseController {
         String username = "";
         String password = "";
         String secret = "";
-        boolean isXray = settings != null && settings.getType() == ProxySettings.Type.XRAY_VLESS;
+        boolean isXray = settings != null && settings.getType() == ProxySettings.Type.XRAY;
         boolean isAether = settings != null && settings.getType() == ProxySettings.Type.AETHER;
         boolean isRedirect = enabled && settings != null && settings.getType() == ProxySettings.Type.REDIRECT_IP && settings.isValid();
         boolean xrayDeferred = false;
@@ -1177,7 +1177,7 @@ public class ConnectionsManager extends BaseController {
                 if (!preferences.getBoolean("proxy_enabled", false)) {
                     return;
                 }
-                if (SharedConfig.currentProxy == null || SharedConfig.currentProxy.settings.getType() != ProxySettings.Type.XRAY_VLESS) {
+                if (SharedConfig.currentProxy == null || SharedConfig.currentProxy.settings.getType() != ProxySettings.Type.XRAY) {
                     return;
                 }
                 setProxySettings(true, SharedConfig.currentProxy.settings);

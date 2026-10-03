@@ -177,19 +177,19 @@ public class XrayProxyManager {
     public static void maybeStartFromApp() {
         SharedConfig.loadProxyList();
         if (SharedConfig.currentProxy != null
-                && SharedConfig.currentProxy.isXrayVless()
+                && SharedConfig.currentProxy.isXray()
                 && MessagesController.getGlobalMainSettings().getBoolean("proxy_enabled", false)) {
             startService();
         }
     }
 
     public static void ensureRunning(SharedConfig.ProxyInfo info) {
-        if (info == null || !info.isXrayVless()) {
+        if (info == null || !info.isXray()) {
             return;
         }
-        if (TextUtils.isEmpty(info.vlessId)) {
-            FileLog.e("Xray: missing VLESS id");
-            markFailed("missing VLESS id");
+        if (info.xrayConfig == null || info.xrayConfig.trim().isEmpty()) {
+            FileLog.e("Xray: missing Xray config");
+            markFailed("missing Xray config");
             return;
         }
         synchronized (sync) {
@@ -466,11 +466,16 @@ public class XrayProxyManager {
     }
 
     private static String buildConfig(SharedConfig.ProxyInfo info) throws Exception {
-        JSONObject root = new JSONObject();
-        JSONObject log = new JSONObject();
-        log.put("loglevel", "warning");
-        root.put("log", log);
-
+        // The user provides the Xray config (outbounds, routing, DNS, ...).
+        // We only force the inbounds to the local socks listener that
+        // Telegram dials; everything else in the JSON is used as-is.
+        String trimmed = info.xrayConfig == null ? "" : info.xrayConfig.trim();
+        JSONObject root = new JSONObject(trimmed);
+        if (root.optJSONObject("log") == null) {
+            JSONObject log = new JSONObject();
+            log.put("loglevel", "warning");
+            root.put("log", log);
+        }
         JSONObject inbound = new JSONObject();
         inbound.put("tag", "socks-in");
         inbound.put("listen", LOCAL_ADDRESS);
@@ -481,173 +486,34 @@ public class XrayProxyManager {
         inboundSettings.put("udp", true);
         inboundSettings.put("ip", LOCAL_ADDRESS);
         inbound.put("settings", inboundSettings);
-        root.put("inbounds", new JSONArray().put(inbound));
-
-        JSONObject outbound = new JSONObject();
-        outbound.put("tag", "proxy");
-        outbound.put("protocol", "vless");
-
-        JSONObject user = new JSONObject();
-        user.put("id", info.vlessId);
-        user.put("encryption", TextUtils.isEmpty(info.vlessEncryption) ? "none" : info.vlessEncryption);
-        if (!TextUtils.isEmpty(info.vlessFlow)) {
-            user.put("flow", info.vlessFlow);
+        JSONArray inbounds = new JSONArray();
+        inbounds.put(inbound);
+        root.put("inbounds", inbounds);
+        JSONArray outbounds = root.optJSONArray("outbounds");
+        if (outbounds == null || outbounds.length() == 0) {
+            throw new Exception("config has no outbounds");
         }
-
-        JSONObject vnext = new JSONObject();
-        vnext.put("address", info.settings.getAddress());
-        vnext.put("port", info.settings.getPort());
-        vnext.put("users", new JSONArray().put(user));
-
-        JSONObject settings = new JSONObject();
-        settings.put("vnext", new JSONArray().put(vnext));
-        outbound.put("settings", settings);
-
-        JSONObject stream = new JSONObject();
-        String network = mapNetwork(info.vlessType);
-        stream.put("network", network);
-
-        String security = normalizeSecurity(info.vlessSecurity);
-        stream.put("security", security);
-        if ("tls".equals(security)) {
-            JSONObject tls = new JSONObject();
-            if (!TextUtils.isEmpty(info.vlessSni)) {
-                tls.put("serverName", info.vlessSni);
-            }
-            if (!TextUtils.isEmpty(info.vlessFp)) {
-                tls.put("fingerprint", info.vlessFp);
-            }
-            if (!TextUtils.isEmpty(info.vlessAlpn)) {
-                JSONArray alpn = new JSONArray();
-                for (String item : info.vlessAlpn.split(",")) {
-                    if (!TextUtils.isEmpty(item.trim())) {
-                        alpn.put(item.trim());
-                    }
-                }
-                if (alpn.length() > 0) {
-                    tls.put("alpn", alpn);
-                }
-            }
-            if (info.vlessAllowInsecure) {
-                tls.put("allowInsecure", true);
-            }
-            stream.put("tlsSettings", tls);
-        } else if ("reality".equals(security)) {
-            JSONObject reality = new JSONObject();
-            if (!TextUtils.isEmpty(info.vlessSni)) {
-                reality.put("serverName", info.vlessSni);
-            }
-            if (!TextUtils.isEmpty(info.vlessFp)) {
-                reality.put("fingerprint", info.vlessFp);
-            }
-            if (!TextUtils.isEmpty(info.vlessPublicKey)) {
-                reality.put("publicKey", info.vlessPublicKey);
-            }
-            if (!TextUtils.isEmpty(info.vlessShortId)) {
-                reality.put("shortId", info.vlessShortId);
-            }
-            if (!TextUtils.isEmpty(info.vlessSpiderX)) {
-                reality.put("spiderX", info.vlessSpiderX);
-            }
-            stream.put("realitySettings", reality);
-        }
-
-        if ("ws".equals(network)) {
-            JSONObject ws = new JSONObject();
-            if (!TextUtils.isEmpty(info.vlessPath)) {
-                ws.put("path", info.vlessPath);
-            }
-            if (!TextUtils.isEmpty(info.vlessHost)) {
-                JSONObject headers = new JSONObject();
-                headers.put("Host", info.vlessHost);
-                ws.put("headers", headers);
-            }
-            stream.put("wsSettings", ws);
-        } else if ("grpc".equals(network)) {
-            JSONObject grpc = new JSONObject();
-            if (!TextUtils.isEmpty(info.vlessServiceName)) {
-                grpc.put("serviceName", info.vlessServiceName);
-            }
-            if (!TextUtils.isEmpty(info.vlessMode)) {
-                grpc.put("multiMode", "multi".equalsIgnoreCase(info.vlessMode) || "true".equalsIgnoreCase(info.vlessMode));
-            }
-            stream.put("grpcSettings", grpc);
-        } else if ("http".equals(network)) {
-            JSONObject http = new JSONObject();
-            if (!TextUtils.isEmpty(info.vlessPath)) {
-                http.put("path", info.vlessPath);
-            }
-            if (!TextUtils.isEmpty(info.vlessHost)) {
-                JSONArray hosts = new JSONArray();
-                for (String host : info.vlessHost.split(",")) {
-                    if (!TextUtils.isEmpty(host.trim())) {
-                        hosts.put(host.trim());
-                    }
-                }
-                if (hosts.length() > 0) {
-                    http.put("host", hosts);
-                }
-            }
-            stream.put("httpSettings", http);
-        } else if ("kcp".equals(network)) {
-            JSONObject kcp = new JSONObject();
-            if (!TextUtils.isEmpty(info.vlessSeed)) {
-                kcp.put("seed", info.vlessSeed);
-            }
-            if (!TextUtils.isEmpty(info.vlessHeaderType)) {
-                JSONObject header = new JSONObject();
-                header.put("type", info.vlessHeaderType);
-                kcp.put("header", header);
-            }
-            stream.put("kcpSettings", kcp);
-        } else if ("quic".equals(network)) {
-            JSONObject quic = new JSONObject();
-            if (!TextUtils.isEmpty(info.vlessQuicSecurity)) {
-                quic.put("security", info.vlessQuicSecurity);
-            }
-            if (!TextUtils.isEmpty(info.vlessQuicKey)) {
-                quic.put("key", info.vlessQuicKey);
-            }
-            if (!TextUtils.isEmpty(info.vlessHeaderType)) {
-                JSONObject header = new JSONObject();
-                header.put("type", info.vlessHeaderType);
-                quic.put("header", header);
-            }
-            stream.put("quicSettings", quic);
-        } else if ("tcp".equals(network) && !TextUtils.isEmpty(info.vlessHeaderType)) {
-            JSONObject tcp = new JSONObject();
-            JSONObject header = new JSONObject();
-            header.put("type", info.vlessHeaderType);
-            tcp.put("header", header);
-            stream.put("tcpSettings", tcp);
-        }
-
-        outbound.put("streamSettings", stream);
-        applyAdvancedJson(outbound, stream, info.vlessAdvancedJson);
-        root.put("outbounds", new JSONArray().put(outbound));
         return root.toString();
     }
 
-    private static String normalizeSecurity(String security) {
-        if (TextUtils.isEmpty(security)) {
-            return "none";
+    /**
+     * Returns an error message when the config JSON cannot be used by the
+     * core, otherwise null. Shared by the proxy editor and its done button.
+     */
+    public static String validateConfig(String json) {
+        if (json == null || json.trim().isEmpty()) {
+            return "empty config";
         }
-        security = security.toLowerCase(Locale.US);
-        if ("tls".equals(security) || "reality".equals(security)) {
-            return security;
+        try {
+            JSONObject root = new JSONObject(json.trim());
+            JSONArray outbounds = root.optJSONArray("outbounds");
+            if (outbounds == null || outbounds.length() == 0) {
+                return "config has no outbounds";
+            }
+            return null;
+        } catch (Exception e) {
+            return e.getMessage();
         }
-        return "none";
-    }
-
-    private static String mapNetwork(String type) {
-        if (TextUtils.isEmpty(type)) {
-            return "tcp";
-        }
-        type = type.toLowerCase(Locale.US);
-        if ("h2".equals(type)) {
-            return "http";
-        }
-        return type;
     }
 
     private static String sha256(String value) throws Exception {
