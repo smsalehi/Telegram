@@ -54,6 +54,7 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.XrayProxyManager;
 import org.telegram.messenger.AetherProxyManager;
+import org.telegram.messenger.GeminiTranslator;
 import org.telegram.messenger.SvgHelper;
 import org.telegram.messenger.Utilities;
 import org.telegram.utils.proxy.WebProxyTransport;
@@ -284,7 +285,7 @@ public class ProxySettingsActivity extends BaseFragment {
                     currentProxyInfo.settings = ProxySettings.builder()
                         .setType(currentType)
                         .setAddress(currentType == ProxySettings.Type.AETHER ? "aether" : inputFields[FIELD_IP].getText().toString())
-                        .setPort(currentType == ProxySettings.Type.WEB ? 0 : currentType == ProxySettings.Type.AETHER ? AetherProxyManager.getLocalSocksPort() : Utilities.parseInt(inputFields[FIELD_PORT].getText().toString()))
+                        .setPort(currentType == ProxySettings.Type.WEB ? 0 : currentType == ProxySettings.Type.AETHER ? AetherProxyManager.getLocalSocksPort() : Utilities.parseInt(inputFields[FIELD_PORT].getText()))
                         .setUser(currentType == ProxySettings.Type.SOCKS5 ? inputFields[FIELD_USER].getText().toString() : "")
                         .setPassword(currentType == ProxySettings.Type.SOCKS5 ? inputFields[FIELD_PASSWORD].getText().toString() : "")
                         .setSecret(currentType != ProxySettings.Type.SOCKS5 && currentType != ProxySettings.Type.XRAY_VLESS && currentType != ProxySettings.Type.AETHER && currentType != ProxySettings.Type.REDIRECT_IP ? inputFields[FIELD_SECRET].getText().toString() : "")
@@ -1228,15 +1229,15 @@ public class ProxySettingsActivity extends BaseFragment {
                     && WebProxyTransport.isValidSecret(inputFields[FIELD_SECRET].getText().toString());
         } else if (currentType == ProxySettings.Type.XRAY_VLESS) {
             enabled = inputFields[FIELD_IP].length() != 0
-                    && Utilities.parseInt(inputFields[FIELD_PORT].getText().toString()) != 0
+                    && Utilities.parseInt(inputFields[FIELD_PORT].getText()) != 0
                     && inputFields[FIELD_VLESS_ID].length() != 0;
         } else if (currentType == ProxySettings.Type.AETHER) {
             enabled = true;
         } else if (currentType == ProxySettings.Type.REDIRECT_IP) {
-            enabled = inputFields[FIELD_IP].length() != 0;
+            enabled = GeminiTranslator.isValidIpv4(inputFields[FIELD_IP].getText().toString().trim());
         } else {
             enabled = inputFields[FIELD_IP].length() != 0
-                    && Utilities.parseInt(inputFields[FIELD_PORT].getText().toString()) != 0;
+                    && Utilities.parseInt(inputFields[FIELD_PORT].getText()) != 0;
         }
         setShareDoneEnabled(enabled, animated);
     }
