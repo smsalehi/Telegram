@@ -91,17 +91,21 @@ public class TranslateController extends BaseController {
     }
 
     public boolean isFeatureAvailable() {
-        return isChatTranslateEnabled() && (UserConfig.getInstance(currentAccount).isPremium() || GeminiTranslator.isEnabled());
+        return GeminiTranslator.isEnabled() || isChatTranslateEnabled() && UserConfig.getInstance(currentAccount).isPremium();
     }
 
     public boolean isFeatureAvailable(long dialogId) {
+        if (GeminiTranslator.isEnabled()) {
+            // Gemini routing replaces the server feature gates; the Gemini
+            // settings screen is the single switch for translation.
+            return true;
+        }
         if (!isChatTranslateEnabled()) {
             return false;
         }
         final TLRPC.Chat chat = getMessagesController().getChat(-dialogId);
         return (
             UserConfig.getInstance(currentAccount).isPremium() ||
-            GeminiTranslator.isEnabled() ||
             chat != null && chat.autotranslation
         );
     }
@@ -613,8 +617,29 @@ public class TranslateController extends BaseController {
         }
 
         if (!isTranslatingDialog(dialogId)) {
-            checkLanguage(messageObject);
+            checkLanguage(messageObject, onScreen);
             return;
+        }
+
+        // Gemini auto mode: on-device detection is the filter. A message may
+        // only reach the API once detection says its language is known, not
+        // restricted ("do not translate") and different from the target one.
+        if (GeminiTranslator.isEnabled() && GeminiTranslator.isAutoTranslate()) {
+            final String originalLanguage = messageObject.messageOwner.originalLanguage;
+            if (originalLanguage == null) {
+                // detection pending; checkDialogTranslatable re-enters here
+                checkLanguage(messageObject, onScreen);
+                return;
+            }
+            if (UNKNOWN_LANGUAGE.equals(originalLanguage) || isLanguageRestricted(originalLanguage)) {
+                return;
+            }
+            final String target = getDialogTranslateTo(dialogId);
+            final int underscore = target != null ? target.indexOf('_') : -1;
+            final String targetBase = underscore >= 0 ? target.substring(0, underscore) : target;
+            if (targetBase == null || targetBase.isEmpty() || targetBase.toLowerCase().equals(originalLanguage)) {
+                return;
+            }
         }
 
         if (isTranslateDialogHidden(dialogId)) {
@@ -874,7 +899,7 @@ public class TranslateController extends BaseController {
     }
 
     private ArrayList<Integer> pendingLanguageChecks = new ArrayList<>();
-    private void checkLanguage(MessageObject messageObject) {
+    private void checkLanguage(MessageObject messageObject, boolean onScreen) {
         if (!LanguageDetector.hasSupport()) {
             return;
         }
@@ -883,13 +908,15 @@ public class TranslateController extends BaseController {
             return;
         }
         if (messageObject.messageOwner.originalLanguage != null) {
-            checkDialogTranslatable(messageObject);
+            checkDialogTranslatable(messageObject, onScreen);
             return;
         }
 
         final long dialogId = messageObject.getDialogId();
         final int hash = hash(messageObject);
-        if (isDialogTranslatable(dialogId)) {
+        // in Gemini auto mode keep detecting even after the dialog became
+        // translatable: every new message needs its own language verdict
+        if (isDialogTranslatable(dialogId) && !(GeminiTranslator.isEnabled() && GeminiTranslator.isAutoTranslate())) {
             return;
         }
         if (pendingLanguageChecks.contains(hash)) {
@@ -907,7 +934,7 @@ public class TranslateController extends BaseController {
                 messageObject.messageOwner.originalLanguage = detectedLanguage;
                 getMessagesStorage().updateMessageCustomParams(dialogId, messageObject.messageOwner);
                 pendingLanguageChecks.remove((Integer) hash);
-                checkDialogTranslatable(messageObject);
+                checkDialogTranslatable(messageObject, onScreen);
             }), err -> AndroidUtilities.runOnUIThread(() -> {
                 messageObject.messageOwner.originalLanguage = UNKNOWN_LANGUAGE;
                 getMessagesStorage().updateMessageCustomParams(dialogId, messageObject.messageOwner);
@@ -916,7 +943,7 @@ public class TranslateController extends BaseController {
         });
     }
 
-    private void checkDialogTranslatable(MessageObject messageObject) {
+    private void checkDialogTranslatable(MessageObject messageObject, boolean onScreen) {
         if (messageObject == null || messageObject.messageOwner == null) {
             return;
         }
@@ -966,6 +993,19 @@ public class TranslateController extends BaseController {
             AndroidUtilities.runOnUIThread(() -> {
                 NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.dialogIsTranslatable, dialogId);
             }, 450);
+        }
+
+        // Gemini auto mode: this message just cleared the on-device filters
+        // (detected, known language, not restricted). If it is on screen and
+        // the dialog is translating, send it to the API now.
+        if (
+            onScreen &&
+            translatable &&
+            GeminiTranslator.isEnabled() &&
+            GeminiTranslator.isAutoTranslate() &&
+            isTranslatingDialog(dialogId)
+        ) {
+            checkTranslation(messageObject, true);
         }
     }
 

@@ -54,6 +54,7 @@ public class GeminiTranslator {
     private static final int GEMINI_PORT = 443;
 
     public static final String DEFAULT_MODEL = "gemini-3.8-flash";
+    private static final String LEGACY_DEFAULT_MODEL = "gemini-2.0-flash";
     public static final String DEFAULT_PROMPT =
             "Translate the following text from {from} to {to}. " +
             "Output only the translation, without explanations, quotes or extra formatting. " +
@@ -121,7 +122,8 @@ public class GeminiTranslator {
     public static String getModel() {
         try {
             String model = prefs().getString(KEY_MODEL, DEFAULT_MODEL);
-            if (TextUtils.isEmpty(model)) {
+            if (TextUtils.isEmpty(model) || LEGACY_DEFAULT_MODEL.equals(model)) {
+                // devices that saved the previous default follow the new default
                 return DEFAULT_MODEL;
             }
             return model;
