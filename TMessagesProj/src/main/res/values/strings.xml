@@ -11332,7 +11332,7 @@
     <string name="GeminiTestOk">Test passed</string>
     <string name="GeminiTestFailed">Test failed</string>
     <string name="UseProxyRedirectIp">Redirect IP (Proxy IP)</string>
-    <string name="UseProxyRedirectIpInfo">All Telegram traffic dials this IP instead of datacenter addresses. Port 0 keeps each datacenter's own port (follows Direct Settings); any other port forces all connections to it. TLS and MTProto handshakes are unchanged.</string>
+    <string name="UseProxyRedirectIpInfo">All Telegram traffic dials this IP instead of datacenter addresses. Port 0 keeps each datacenter\'s own port (follows Direct Settings); any other port forces all connections to it. TLS and MTProto handshakes are unchanged.</string>
     <string name="ConnectionSettings">Connection Settings</string>
     <string name="DirectSettings">Direct Settings</string>
     <string name="ModifyDirectPort">Modify Direct connection port</string>
