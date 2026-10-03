@@ -29,7 +29,8 @@ public final class ProxySettings {
         MTPROTO,
         WEB,
         XRAY_VLESS,
-        AETHER
+        AETHER,
+        REDIRECT_IP
     }
 
     private final @NonNull Type type;
@@ -64,6 +65,11 @@ public final class ProxySettings {
             user = "";
             password = "";
         } else if (type == Type.AETHER) {
+            secret = "";
+            port = builder.port;
+            user = "";
+            password = "";
+        } else if (type == Type.REDIRECT_IP) {
             secret = "";
             port = builder.port;
             user = "";
@@ -105,6 +111,9 @@ public final class ProxySettings {
     public boolean isValid() {
         if (TextUtils.isEmpty(address)) {
             return false;
+        }
+        if (type == Type.REDIRECT_IP) {
+            return port >= 0;
         }
         return type == Type.WEB
                 ? isValidWebAddress(address) && isValidWebProxySecret(secret)
@@ -231,6 +240,12 @@ public final class ProxySettings {
                 editor.remove("proxy_user");
                 break;
             case AETHER:
+                editor.putInt("proxy_port", port);
+                editor.remove("proxy_secret");
+                editor.remove("proxy_pass");
+                editor.remove("proxy_user");
+                break;
+            case REDIRECT_IP:
                 editor.putInt("proxy_port", port);
                 editor.remove("proxy_secret");
                 editor.remove("proxy_pass");
@@ -551,6 +566,8 @@ public final class ProxySettings {
                 return 3;
             case AETHER:
                 return 4;
+            case REDIRECT_IP:
+                return 5;
         }
         return 0;
     }
@@ -567,6 +584,8 @@ public final class ProxySettings {
                 return Type.XRAY_VLESS;
             case 4:
                 return Type.AETHER;
+            case 5:
+                return Type.REDIRECT_IP;
         }
         return Type.SOCKS5;
     }

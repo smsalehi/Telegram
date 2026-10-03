@@ -69,6 +69,9 @@ public:
     void setIpStrategy(uint8_t value);
     void setDirectPortMode(int32_t mode);
     int32_t getDirectPortMode();
+    void setRedirectAddress(std::string ip, uint16_t port);
+    std::string getRedirectAddress();
+    uint16_t getRedirectPort();
     void init(uint32_t version, int32_t layer, int32_t apiId, std::string deviceModel, std::string systemVersion, std::string appVersion, std::string langCode, std::string systemLangCode, std::string configPath, std::string logPath, std::string regId, std::string cFingerprint, std::string installerId, std::string packageId, int32_t timezoneOffset, int64_t userId, bool userPremium, bool isPaused, bool enablePushConnection, bool hasNetwork, int32_t networkType, int32_t performanceClass);
     void setProxySettings(std::string address, uint16_t port, std::string username, std::string password, std::string secret);
     void setLangCode(std::string langCode);
@@ -209,6 +212,8 @@ private:
     bool networkSlow = false;
     uint8_t ipStrategy = USE_IPV4_ONLY;
     int32_t directPortMode = 0;
+    std::string redirectAddress = "";
+    uint16_t redirectPort = 0;
     bool lastProtocolIsIpv6 = false;
     bool lastProtocolUsefullData = false;
     std::vector<ConnectionSocket *> activeConnections;

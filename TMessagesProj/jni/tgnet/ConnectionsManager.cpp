@@ -3908,6 +3908,27 @@ int32_t ConnectionsManager::getDirectPortMode() {
     return directPortMode;
 }
 
+std::string ConnectionsManager::getRedirectAddress() {
+    return redirectAddress;
+}
+
+uint16_t ConnectionsManager::getRedirectPort() {
+    return redirectPort;
+}
+
+void ConnectionsManager::setRedirectAddress(std::string ip, uint16_t port) {
+    scheduleTask([&, ip, port] {
+        if (redirectAddress == ip && redirectPort == port) {
+            return;
+        }
+        redirectAddress = ip;
+        redirectPort = port;
+        for (auto & datacenter : datacenters) {
+            datacenter.second->suspendConnections(true);
+        }
+    });
+}
+
 int64_t ConnectionsManager::checkProxy(std::string address, uint16_t port, std::string username, std::string password, std::string secret, onRequestTimeFunc requestTimeFunc, jobject ptr1) {
     auto proxyCheckInfo = new ProxyCheckInfo();
     proxyCheckInfo->address = address;

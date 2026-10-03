@@ -664,6 +664,11 @@ public class ConnectionsManager extends BaseController {
                 int localPort = WebProxyTransport.start(proxySettings.getAddress(), proxySettings.getSecret());
                 native_setProxySettings(currentAccount, "127.0.0.1", localPort != 0 ? localPort : 9, "", "",
                         proxySettings.getSecret());
+            } else if (proxySettings.getType() == ProxySettings.Type.REDIRECT_IP) {
+                XrayProxyManager.stopProcess();
+                AetherProxyManager.stopProcess();
+                native_setProxySettings(currentAccount, "", 1080, "", "", "");
+                native_setRedirectAddress(currentAccount, proxySettings.getAddress(), proxySettings.getPort());
             } else {
                 native_setProxySettings(currentAccount, proxySettings.getAddress(), proxySettings.getPort(),
                         proxySettings.getUser(), proxySettings.getPassword(), proxySettings.getSecret());
@@ -774,6 +779,9 @@ public class ConnectionsManager extends BaseController {
         if (settings.getType() == ProxySettings.Type.AETHER) {
             return checkAetherProxy(settings, requestTimeDelegate);
         }
+        if (settings.getType() == ProxySettings.Type.REDIRECT_IP) {
+            return checkRedirectProxy(settings, requestTimeDelegate);
+        }
 
         return native_checkProxy(currentAccount, settings.getAddress(), settings.getPort(), settings.getUser(), settings.getPassword(), settings.getSecret(), requestTimeDelegate);
     }
@@ -824,6 +832,29 @@ public class ConnectionsManager extends BaseController {
             Socket socket = new Socket();
             try {
                 socket.connect(new InetSocketAddress(AetherProxyManager.LOCAL_ADDRESS, AetherProxyManager.getLocalSocksPort()), 5000);
+                time = SystemClock.elapsedRealtime() - start;
+            } catch (Exception ignored) {
+            } finally {
+                try {
+                    socket.close();
+                } catch (Exception ignored) {
+                }
+            }
+            final long result = time;
+            AndroidUtilities.runOnUIThread(() -> requestTimeDelegate.run(result));
+        });
+        return 0;
+    }
+
+    private long checkRedirectProxy(ProxySettings settings, RequestTimeDelegate requestTimeDelegate) {
+        final String address = settings.getAddress();
+        final int port = settings.getPort() != 0 ? settings.getPort() : 443;
+        final long start = SystemClock.elapsedRealtime();
+        Utilities.globalQueue.postRunnable(() -> {
+            long time = -1;
+            Socket socket = new Socket();
+            try {
+                socket.connect(new InetSocketAddress(address, port), 5000);
                 time = SystemClock.elapsedRealtime() - start;
             } catch (Exception ignored) {
             } finally {
@@ -1038,6 +1069,7 @@ public class ConnectionsManager extends BaseController {
         String secret = "";
         boolean isXray = settings != null && settings.getType() == ProxySettings.Type.XRAY_VLESS;
         boolean isAether = settings != null && settings.getType() == ProxySettings.Type.AETHER;
+        boolean isRedirect = enabled && settings != null && settings.getType() == ProxySettings.Type.REDIRECT_IP && settings.isValid();
         boolean xrayDeferred = false;
         boolean aetherDeferred = false;
 
@@ -1084,6 +1116,14 @@ public class ConnectionsManager extends BaseController {
                         aetherDeferred = true;
                         enabled = false;
                     }
+                } else if (isRedirect) {
+                    AetherProxyManager.stopService();
+                    XrayProxyManager.stopService();
+                    address = "";
+                    port = 1080;
+                    username = "";
+                    password = "";
+                    secret = "";
                 }
             }
         } else {
@@ -1101,9 +1141,16 @@ public class ConnectionsManager extends BaseController {
 
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
             if (enabled && settings != null && settings.isValid()) {
-                native_setProxySettings(a, address, port, username, password, secret);
+                if (isRedirect) {
+                    native_setProxySettings(a, "", 1080, "", "", "");
+                    native_setRedirectAddress(a, settings.getAddress(), settings.getPort());
+                } else {
+                    native_setProxySettings(a, address, port, username, password, secret);
+                    native_setRedirectAddress(a, "", 0);
+                }
             } else {
                 native_setProxySettings(a, "", 1080, "", "", "");
+                native_setRedirectAddress(a, "", 0);
             }
             AccountInstance accountInstance = AccountInstance.getInstance(a);
             if (accountInstance.getUserConfig().isClientActivated()) {
@@ -1197,6 +1244,7 @@ public class ConnectionsManager extends BaseController {
     public static native void native_setUserId(int currentAccount, long id);
     public static native void native_init(int currentAccount, int version, int layer, int apiId, String deviceModel, String systemVersion, String appVersion, String langCode, String systemLangCode, String configPath, String logPath, String regId, String cFingerprint, String installer, String packageId, int timezoneOffset, long userId, boolean userPremium, boolean enablePushConnection, boolean hasNetwork, int networkType, int performanceClass);
     public static native void native_setProxySettings(int currentAccount, String address, int port, String username, String password, String secret);
+    public static native void native_setRedirectAddress(int currentAccount, String ip, int port);
     public static native void native_setLangCode(int currentAccount, String langCode);
     public static native void native_setRegId(int currentAccount, String regId);
     public static native void native_setSystemLangCode(int currentAccount, String langCode);

@@ -44,14 +44,15 @@ public class GeminiTranslateActivity extends BaseFragment {
 
     private static final int ROW_HEADER = 0;
     private static final int ROW_ENABLE = 1;
-    private static final int ROW_MODEL = 2;
-    private static final int ROW_API_KEY = 3;
-    private static final int ROW_REDIRECT = 4;
-    private static final int ROW_PROMPT = 5;
-    private static final int ROW_TEST = 6;
-    private static final int ROW_SHADOW = 7;
-    private static final int ROW_INFO = 8;
-    private static final int ROW_COUNT = 9;
+    private static final int ROW_AUTO = 2;
+    private static final int ROW_MODEL = 3;
+    private static final int ROW_API_KEY = 4;
+    private static final int ROW_REDIRECT = 5;
+    private static final int ROW_PROMPT = 6;
+    private static final int ROW_TEST = 7;
+    private static final int ROW_SHADOW = 8;
+    private static final int ROW_INFO = 9;
+    private static final int ROW_COUNT = 10;
 
     private RecyclerListView listView;
     private ListAdapter listAdapter;
@@ -105,6 +106,10 @@ public class GeminiTranslateActivity extends BaseFragment {
                 GeminiTranslator.setEnabled(value);
                 ((TextCheckCell) view).setChecked(value);
                 listAdapter.notifyItemChanged(ROW_API_KEY);
+            } else if (position == ROW_AUTO && view instanceof TextCheckCell) {
+                boolean value = !GeminiTranslator.isAutoTranslate();
+                GeminiTranslator.setAutoTranslate(value);
+                ((TextCheckCell) view).setChecked(value);
             } else if (position == ROW_API_KEY) {
                 openApiKeyDialog(false);
             } else if (position == ROW_REDIRECT) {
@@ -135,6 +140,9 @@ public class GeminiTranslateActivity extends BaseFragment {
         editText.setText(GeminiTranslator.getApiKey());
         editText.setHint(LocaleController.getString(R.string.GeminiApiKeyHint));
         editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        editText.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
+        editText.setHintTextColor(Theme.getColor(Theme.key_groupcreate_hintText));
+        editText.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4));
         editText.setSelection(editText.getText() != null ? editText.getText().length() : 0);
         layout.addView(editText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 36, Gravity.LEFT | Gravity.TOP, 24, 6, 24, 0));
         builder.setView(layout);
@@ -167,6 +175,9 @@ public class GeminiTranslateActivity extends BaseFragment {
         editText.setText(GeminiTranslator.getRedirectIp());
         editText.setHint(LocaleController.getString(R.string.GeminiRedirectHint));
         editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        editText.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
+        editText.setHintTextColor(Theme.getColor(Theme.key_groupcreate_hintText));
+        editText.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4));
         editText.setSelection(editText.getText() != null ? editText.getText().length() : 0);
         layout.addView(editText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 36, Gravity.LEFT | Gravity.TOP, 24, 6, 24, 0));
         builder.setView(layout);
@@ -214,6 +225,7 @@ public class GeminiTranslateActivity extends BaseFragment {
             final android.widget.TextView textView = new android.widget.TextView(getParentActivity());
             textView.setTextSize(12);
             textView.setTypeface(android.graphics.Typeface.MONOSPACE);
+            textView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
             textView.setTextIsSelectable(true);
             int pad = (int) (16 * getParentActivity().getResources().getDisplayMetrics().density);
             textView.setPadding(pad, pad / 2, pad, pad / 2);
@@ -236,34 +248,32 @@ public class GeminiTranslateActivity extends BaseFragment {
         if (getParentActivity() == null) {
             return;
         }
-        final AlertDialog progressDialog = new AlertDialog(getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER);
-        progressDialog.show();
-        GeminiTranslator.fetchModels(models -> {
-            try {
-                progressDialog.dismiss();
-            } catch (Throwable ignored) {}
-            if (getParentActivity() == null) {
-                return;
+        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+        builder.setTitle(LocaleController.getString(R.string.GeminiModel));
+
+        LinearLayout layout = new LinearLayout(getParentActivity());
+        layout.setOrientation(LinearLayout.VERTICAL);
+        final EditTextBoldCursor editText = new EditTextBoldCursor(getParentActivity());
+        editText.setTextSize(16);
+        editText.setText(GeminiTranslator.getModel());
+        editText.setHint(GeminiTranslator.DEFAULT_MODEL);
+        editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        editText.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
+        editText.setHintTextColor(Theme.getColor(Theme.key_groupcreate_hintText));
+        editText.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4));
+        editText.setSelection(editText.getText() != null ? editText.getText().length() : 0);
+        layout.addView(editText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 36, Gravity.LEFT | Gravity.TOP, 24, 6, 24, 0));
+        builder.setView(layout);
+
+        builder.setPositiveButton(LocaleController.getString(R.string.Save), (dialog, which) -> {
+            String model = editText.getText() != null ? editText.getText().toString().trim() : "";
+            GeminiTranslator.setModel(model);
+            if (listAdapter != null) {
+                listAdapter.notifyItemChanged(ROW_MODEL);
             }
-            final String[] items;
-            if (models != null && !models.isEmpty()) {
-                items = models.toArray(new String[0]);
-            } else {
-                items = GeminiTranslator.MODELS;
-            }
-            AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
-            builder.setTitle(LocaleController.getString(R.string.GeminiModel));
-            builder.setItems(items, (dialog, which) -> {
-                if (which >= 0 && which < items.length) {
-                    GeminiTranslator.setModel(items[which]);
-                    if (listAdapter != null) {
-                        listAdapter.notifyItemChanged(ROW_MODEL);
-                    }
-                }
-            });
-            builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
-            showDialog(builder.create());
         });
+        builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
+        showDialog(builder.create());
     }
 
     private void openPromptDialog() {
@@ -280,6 +290,9 @@ public class GeminiTranslateActivity extends BaseFragment {
         editText.setText(GeminiTranslator.getPrompt());
         editText.setHint("{text} {from} {to}");
         editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        editText.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
+        editText.setHintTextColor(Theme.getColor(Theme.key_groupcreate_hintText));
+        editText.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4));
         editText.setMinLines(4);
         layout.addView(editText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP, 24, 6, 24, 0));
         builder.setView(layout);
@@ -310,7 +323,7 @@ public class GeminiTranslateActivity extends BaseFragment {
         @Override
         public int getItemViewType(int position) {
             if (position == ROW_HEADER) return VIEW_TYPE_HEADER;
-            if (position == ROW_ENABLE) return VIEW_TYPE_SWITCH;
+            if (position == ROW_ENABLE || position == ROW_AUTO) return VIEW_TYPE_SWITCH;
             if (position == ROW_MODEL || position == ROW_API_KEY || position == ROW_REDIRECT || position == ROW_PROMPT || position == ROW_TEST) return VIEW_TYPE_SETTINGS;
             if (position == ROW_SHADOW) return VIEW_TYPE_SHADOW;
             return VIEW_TYPE_INFO;
@@ -351,7 +364,11 @@ public class GeminiTranslateActivity extends BaseFragment {
                 }
                 case VIEW_TYPE_SWITCH: {
                     TextCheckCell cell = (TextCheckCell) holder.itemView;
-                    cell.setTextAndCheck(LocaleController.getString(R.string.GeminiTranslateEnable), GeminiTranslator.isEnabled(), true);
+                    if (position == ROW_AUTO) {
+                        cell.setTextAndCheck(LocaleController.getString(R.string.GeminiAutoTranslate), GeminiTranslator.isAutoTranslate(), true);
+                    } else {
+                        cell.setTextAndCheck(LocaleController.getString(R.string.GeminiTranslateEnable), GeminiTranslator.isEnabled(), true);
+                    }
                     break;
                 }
                 case VIEW_TYPE_SETTINGS: {

@@ -357,6 +357,35 @@ void Connection::connect() {
     } else {
         hostPort = (uint16_t) currentDatacenter->getCurrentPort(currentAddressFlags);
     }
+    // Redirect-IP proxy: dial the redirect target instead of the datacenter
+    // address (Xray freedom-style redirect). The DC handshake, protocol and
+    // port selection above stay unchanged; port 0 keeps the resolved port
+    // (which follows Direct Settings), any other port forces all connections
+    // to it. Proxy-check connections always dial their own target.
+    if (connectionType != ConnectionTypeProxy) {
+        std::string redirectIp = ConnectionsManager::getInstance(currentDatacenter->instanceNum).getRedirectAddress();
+        uint16_t redirectPort = ConnectionsManager::getInstance(currentDatacenter->instanceNum).getRedirectPort();
+        if (!redirectIp.empty()) {
+            hostAddress = redirectIp;
+            if (redirectPort != 0) {
+                hostPort = redirectPort;
+            }
+        }
+    }
+    // Redirect-IP proxy: dial the redirect target instead of the datacenter,
+    // keeping the DC handshake (Xray freedom-style redirect). Port 0 keeps
+    // the resolved port (follows Direct port mode); otherwise force it.
+    // Proxy-check connections always dial their own target.
+    if (connectionType != ConnectionTypeProxy) {
+        std::string redirectIp = ConnectionsManager::getInstance(currentDatacenter->instanceNum).redirectAddress;
+        if (!redirectIp.empty()) {
+            hostAddress = redirectIp;
+            uint16_t redirectPort = ConnectionsManager::getInstance(currentDatacenter->instanceNum).redirectPort;
+            if (redirectPort != 0) {
+                hostPort = redirectPort;
+            }
+        }
+    }
 
     reconnectTimer->stop();
 

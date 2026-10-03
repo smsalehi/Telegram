@@ -239,6 +239,9 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                 String title = !TextUtils.isEmpty(proxyInfo.proxyName) ? proxyInfo.proxyName : "Aether";
                 String detail = !TextUtils.isEmpty(proxyInfo.aetherProtocol) ? proxyInfo.aetherProtocol.toUpperCase() : "";
                 textView.setText(title + (TextUtils.isEmpty(detail) ? " (Aether)" : " (Aether " + detail + ")"));
+            } else if (proxyInfo.isRedirectIp()) {
+                String port = proxyInfo.settings.getPort() != 0 ? ":" + proxyInfo.settings.getPort() : "";
+                textView.setText(proxyInfo.settings.getAddress() + port + " (Redirect)");
             } else {
                 textView.setText(proxyInfo.settings.getType() == ProxySettings.Type.WEB
                         ? proxyInfo.settings.getAddress() + " (WEB)"

@@ -528,6 +528,10 @@ public class SharedConfig {
             return settings != null && settings.getType() == ProxySettings.Type.AETHER;
         }
 
+        public boolean isRedirectIp() {
+            return settings != null && settings.getType() == ProxySettings.Type.REDIRECT_IP;
+        }
+
         public String getVlessLink() {
             StringBuilder url = new StringBuilder("vless://");
             try {

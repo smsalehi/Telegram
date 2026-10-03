@@ -192,6 +192,9 @@ public class TranslateController extends BaseController {
     }
 
     public boolean isDialogTranslatable(long dialogId) {
+        if (GeminiTranslator.isEnabled() && !GeminiTranslator.isAutoTranslate()) {
+            return false;
+        }
         return (
             translatableDialogs.contains(dialogId) &&
             isFeatureAvailable(dialogId) &&
@@ -225,6 +228,9 @@ public class TranslateController extends BaseController {
     }
 
     public boolean isTranslatingDialog(long dialogId) {
+        if (GeminiTranslator.isEnabled() && GeminiTranslator.isAutoTranslate() && translatingDialogs.indexOfKey(dialogId) < 0) {
+            return isFeatureAvailable(dialogId);
+        }
         return isFeatureAvailable(dialogId) && translatingDialogs.get(dialogId, isChatAutoTranslated(dialogId));
     }
 

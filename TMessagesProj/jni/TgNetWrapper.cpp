@@ -285,6 +285,14 @@ void setDirectPortMode(JNIEnv *env, jclass c, jint instanceNum, jint mode) {
     ConnectionsManager::getInstance(instanceNum).setDirectPortMode((int32_t) mode);
 }
 
+void setRedirectAddress(JNIEnv *env, jclass c, jint instanceNum, jstring ip, jint port) {
+    const char *ipStr = env->GetStringUTFChars(ip, 0);
+    ConnectionsManager::getInstance(instanceNum).setRedirectAddress(ipStr != nullptr ? ipStr : "", (uint16_t) port);
+    if (ipStr != 0) {
+        env->ReleaseStringUTFChars(ip, ipStr);
+    }
+}
+
 void setNetworkAvailable(JNIEnv *env, jclass c, jint instanceNum, jboolean value, jint networkType, jboolean slow) {
     ConnectionsManager::getInstance(instanceNum).setNetworkAvailable(value, networkType, slow);
 }
@@ -554,6 +562,7 @@ static JNINativeMethod ConnectionsManagerMethods[] = {
         {"native_moveDatacenter", "(II)V", (void *) moveDatacenter},
         {"native_setIpStrategy", "(IB)V", (void *) setIpStrategy},
         {"native_setDirectPortMode", "(II)V", (void *) setDirectPortMode},
+        {"native_setRedirectAddress", "(ILjava/lang/String;I)V", (void *) setRedirectAddress},
         {"native_setNetworkAvailable", "(IZIZ)V", (void *) setNetworkAvailable},
         {"native_setPushConnectionEnabled", "(IZ)V", (void *) setPushConnectionEnabled},
         {"native_setJava", "(Z)V", (void *) setJava},

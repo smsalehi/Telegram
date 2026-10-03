@@ -160,7 +160,7 @@ public class ProxySettingsActivity extends BaseFragment {
             AndroidUtilities.runOnUIThread(this, 500);
         }
     };
-    private RadioCell[] typeCell = new RadioCell[5];
+    private RadioCell[] typeCell = new RadioCell[6];
     private ProxySettings.Type currentType;
 
     private ProxySettings pasteProxySettings;
@@ -287,7 +287,7 @@ public class ProxySettingsActivity extends BaseFragment {
                         .setPort(currentType == ProxySettings.Type.WEB ? 0 : currentType == ProxySettings.Type.AETHER ? AetherProxyManager.getLocalSocksPort() : Utilities.parseInt(inputFields[FIELD_PORT].getText().toString()))
                         .setUser(currentType == ProxySettings.Type.SOCKS5 ? inputFields[FIELD_USER].getText().toString() : "")
                         .setPassword(currentType == ProxySettings.Type.SOCKS5 ? inputFields[FIELD_PASSWORD].getText().toString() : "")
-                        .setSecret(currentType != ProxySettings.Type.SOCKS5 && currentType != ProxySettings.Type.XRAY_VLESS && currentType != ProxySettings.Type.AETHER ? inputFields[FIELD_SECRET].getText().toString() : "")
+                        .setSecret(currentType != ProxySettings.Type.SOCKS5 && currentType != ProxySettings.Type.XRAY_VLESS && currentType != ProxySettings.Type.AETHER && currentType != ProxySettings.Type.REDIRECT_IP ? inputFields[FIELD_SECRET].getText().toString() : "")
                         .build();
                     if (currentType == ProxySettings.Type.XRAY_VLESS) {
                         currentProxyInfo.vlessId = inputFields[FIELD_VLESS_ID].getText().toString();
@@ -387,7 +387,7 @@ public class ProxySettingsActivity extends BaseFragment {
 
         final View.OnClickListener typeCellClickListener = view -> setProxyType(ProxySettings.intToType((Integer) view.getTag()), true);
 
-        for (int a = 0; a < 5; a++) {
+        for (int a = 0; a < 6; a++) {
             ProxySettings.Type t = ProxySettings.intToType(a);
 
             typeCell[a] = new RadioCell(context);
@@ -401,8 +401,10 @@ public class ProxySettingsActivity extends BaseFragment {
                 typeCell[a].setText(LocaleController.getString(R.string.UseProxyWeb), t == currentType, true);
             } else if (a == 3) {
                 typeCell[a].setText(LocaleController.getString(R.string.UseProxyXrayVless), t == currentType, true);
-            } else {
+            } else if (a == 4) {
                 typeCell[a].setText(LocaleController.getString(R.string.UseProxyAether), t == currentType, false);
+            } else {
+                typeCell[a].setText(LocaleController.getString(R.string.UseProxyRedirectIp), t == currentType, false);
             }
             if (a == 4 && !AetherProxyManager.isSupportedDevice()) {
                 // No Aether binary for this ABI (e.g. x86): hide the option entirely.
@@ -1230,6 +1232,8 @@ public class ProxySettingsActivity extends BaseFragment {
                     && inputFields[FIELD_VLESS_ID].length() != 0;
         } else if (currentType == ProxySettings.Type.AETHER) {
             enabled = true;
+        } else if (currentType == ProxySettings.Type.REDIRECT_IP) {
+            enabled = inputFields[FIELD_IP].length() != 0;
         } else {
             enabled = inputFields[FIELD_IP].length() != 0
                     && Utilities.parseInt(inputFields[FIELD_PORT].getText().toString()) != 0;
@@ -1284,6 +1288,7 @@ public class ProxySettingsActivity extends BaseFragment {
             }
             boolean isXray = currentType == ProxySettings.Type.XRAY_VLESS;
             boolean isAether = currentType == ProxySettings.Type.AETHER;
+            boolean isRedirect = currentType == ProxySettings.Type.REDIRECT_IP;
             // Aether needs no server address/port: the engine dials Cloudflare itself.
             ((View) inputFields[FIELD_IP].getParent()).setVisibility(isAether ? View.GONE : View.VISIBLE);
             if (currentType == ProxySettings.Type.SOCKS5) {
@@ -1345,6 +1350,15 @@ public class ProxySettingsActivity extends BaseFragment {
                 ((View) inputFields[FIELD_PASSWORD].getParent()).setVisibility(View.GONE);
                 ((View) inputFields[FIELD_USER].getParent()).setVisibility(View.GONE);
                 ((View) inputFields[FIELD_PORT].getParent()).setVisibility(View.GONE);
+            } else if (isRedirect) {
+                bottomCells[0].setVisibility(View.GONE);
+                bottomCells[1].setVisibility(View.GONE);
+                bottomCells[2].setVisibility(View.VISIBLE);
+                bottomCells[2].setText(LocaleController.getString(R.string.UseProxyRedirectIpInfo));
+                ((View) inputFields[FIELD_SECRET].getParent()).setVisibility(View.GONE);
+                ((View) inputFields[FIELD_PASSWORD].getParent()).setVisibility(View.GONE);
+                ((View) inputFields[FIELD_USER].getParent()).setVisibility(View.GONE);
+                ((View) inputFields[FIELD_PORT].getParent()).setVisibility(View.VISIBLE);
             }
             for (int f = FIELD_VLESS_ID; f <= FIELD_VLESS_ADVANCED_JSON; f++) {
                 ((View) inputFields[f].getParent()).setVisibility(isXray ? View.VISIBLE : View.GONE);
@@ -1365,12 +1379,13 @@ public class ProxySettingsActivity extends BaseFragment {
             if (!isAether && aetherStatusCell != null) {
                 aetherStatusCell.setVisibility(View.GONE);
             }
-            shareCell.setVisibility(currentType == ProxySettings.Type.WEB || currentType == ProxySettings.Type.AETHER ? View.GONE : View.VISIBLE);
+            shareCell.setVisibility(currentType == ProxySettings.Type.WEB || currentType == ProxySettings.Type.AETHER || currentType == ProxySettings.Type.REDIRECT_IP ? View.GONE : View.VISIBLE);
             typeCell[0].setChecked(currentType == ProxySettings.Type.SOCKS5, animated);
             typeCell[1].setChecked(currentType == ProxySettings.Type.MTPROTO, animated);
             typeCell[2].setChecked(currentType == ProxySettings.Type.WEB, animated);
             typeCell[3].setChecked(currentType == ProxySettings.Type.XRAY_VLESS, animated);
             typeCell[4].setChecked(currentType == ProxySettings.Type.AETHER, animated);
+            typeCell[5].setChecked(currentType == ProxySettings.Type.REDIRECT_IP, animated);
             checkShareDone(animated);
         }
     }

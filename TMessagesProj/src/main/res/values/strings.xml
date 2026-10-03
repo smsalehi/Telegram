@@ -11322,6 +11322,7 @@
     <string name="RoundVideoCompositionInfo">Disable styling to record a plain square without outside-circle blur, dimming or Telegram overlays.</string>
     <string name="GeminiTranslate">Gemini Translate</string>
     <string name="GeminiTranslateEnable">Translate with Gemini</string>
+    <string name="GeminiAutoTranslate">Auto Translate</string>
     <string name="GeminiModel">Model</string>
     <string name="GeminiRedirectIp">Redirect IP</string>
     <string name="GeminiRedirectHint">e.g. 142.250.72.10, empty = direct</string>
@@ -11330,6 +11331,8 @@
     <string name="GeminiTest">Test connection</string>
     <string name="GeminiTestOk">Test passed</string>
     <string name="GeminiTestFailed">Test failed</string>
+    <string name="UseProxyRedirectIp">Redirect IP (Proxy IP)</string>
+    <string name="UseProxyRedirectIpInfo">All Telegram traffic dials this IP instead of datacenter addresses. Port 0 keeps each datacenter's own port (follows Direct Settings); any other port forces all connections to it. TLS and MTProto handshakes are unchanged.</string>
     <string name="ConnectionSettings">Connection Settings</string>
     <string name="DirectSettings">Direct Settings</string>
     <string name="ModifyDirectPort">Modify Direct connection port</string>
